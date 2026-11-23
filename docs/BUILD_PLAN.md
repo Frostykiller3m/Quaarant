@@ -3,7 +3,7 @@
 Work one task per Claude Code session: `/task M1-T2`. Each task ends with proof (tests, real
 runs, numbers) and a merge to `main`. Tick tasks off here. Read `CLAUDE.md` first, every time.
 
-Go 1.23+, Linux. Windows users run everything inside WSL2 (Ubuntu 24.04). `vm` isolation in WSL2
+Go 1.26+ (was 1.23+; raised in M0-T2 because current x/sys and grpc need it), Linux. Windows users run everything inside WSL2 (Ubuntu 24.04). `vm` isolation in WSL2
 needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/dev/kvm`.
 
 ## M0 — Foundations
@@ -19,7 +19,7 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
   build for linux/amd64 and arm64), and `qt version`. No features yet.
   ```
 
-- [ ] **M0-T2 · Contracts**
+- [x] **M0-T2 · Contracts**
       Done when: proto files for the qtd API; a Go `Backend` interface; a versioned event JSON
       schema with examples; `qt doctor` reports KVM, runsc, cgroup v2, nftables, btrfs/xfs
       reflink.

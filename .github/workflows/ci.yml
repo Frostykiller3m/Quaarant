@@ -25,19 +25,36 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.15.0
+      - name: qt-agent stays stdlib-only
+        run: make agent-deps
+
+  proto:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: install buf + plugins
+        run: |
+          make tools
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: lint and check generated code is current
+        run: make proto-check
 
   test:
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        # minimum supported (go.mod) and current stable
-        go: ["1.23.x", stable]
+        # minimum supported (from go.mod) and current stable
+        go: [min, stable]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go }}
+          go-version: ${{ matrix.go == 'stable' && 'stable' || '' }}
+          go-version-file: ${{ matrix.go == 'min' && 'go.mod' || '' }}
       - name: vet
         run: make vet
       - name: test
@@ -70,6 +87,16 @@ jobs:
           bin/linux-amd64/qt version --json
           bin/linux-amd64/qtd --version
           bin/linux-amd64/qt-agent --version
+      - name: qt doctor on a real Linux host (amd64)
+        if: matrix.arch == 'amd64'
+        run: |
+          # Hosted runners expose /dev/kvm but it is root-only by default.
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm || true
+          # Exit status reflects whether runsc/firecracker exist (they don't on runners yet).
+          bin/linux-amd64/qt doctor --data-dir "$RUNNER_TEMP/qt" || true
+          bin/linux-amd64/qt doctor --json --data-dir "$RUNNER_TEMP/qt" | tee doctor.json || true
+          grep -q '"name": "kvm"' doctor.json
       - uses: actions/upload-artifact@v4
         with:
           name: qt-linux-${{ matrix.arch }}

@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quarantine.dev/schema/events/v1.json",
+  "title": "quarantine event v1",
+  "description": "One line of a sandbox's events.jsonl. Everything here may originate from untrusted code: every string and array is bounded, and unknown fields are rejected.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["v", "id", "ts", "sandbox", "kind", "source", "data"],
+  "properties": {
+    "v": { "const": 1, "description": "Schema major version." },
+    "id": { "$ref": "#/$defs/eventId" },
+    "ts": { "type": "string", "format": "date-time", "maxLength": 40 },
+    "sandbox": { "$ref": "#/$defs/sandboxId" },
+    "kind": { "enum": ["exec", "file", "net", "dns", "policy_denied", "honeytoken"] },
+    "source": {
+      "enum": ["host", "guest"],
+      "description": "Who observed it. 'guest' events are claims made by code inside the sandbox (qt-agent) and must be treated as untrusted."
+    },
+    "data": { "type": "object" }
+  },
+  "allOf": [
+    { "if": { "properties": { "kind": { "const": "exec" } } }, "then": { "properties": { "data": { "$ref": "#/$defs/exec" } } } },
+    { "if": { "properties": { "kind": { "const": "file" } } }, "then": { "properties": { "data": { "$ref": "#/$defs/file" } } } },
+    {
+      "if": { "properties": { "kind": { "const": "net" } } },
+      "then": { "properties": { "source": { "const": "host" }, "data": { "$ref": "#/$defs/net" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "dns" } } },
+      "then": { "properties": { "source": { "const": "host" }, "data": { "$ref": "#/$defs/dns" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "policy_denied" } } },
+      "then": { "properties": { "source": { "const": "host" }, "data": { "$ref": "#/$defs/policyDenied" } } }
+    },
+    { "if": { "properties": { "kind": { "const": "honeytoken" } } }, "then": { "properties": { "data": { "$ref": "#/$defs/honeytoken" } } } },
+    {
+      "description": "Egress is only ever observed on the host side.",
+      "if": {
+        "properties": { "kind": { "const": "honeytoken" }, "data": { "properties": { "trigger": { "enum": ["egress_dns", "egress_sni", "egress_plaintext"] } }, "required": ["trigger"] } },
+        "required": ["kind", "data"]
+      },
+      "then": { "properties": { "source": { "const": "host" } } }
+    }
+  ],
+  "$defs": {
+    "eventId": { "type": "string", "pattern": "^ev_[0-9A-Za-z]{1,40}$" },
+    "sandboxId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+    "path": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "pid": { "type": "integer", "minimum": 0, "maximum": 4194304 },
+    "port": { "type": "integer", "minimum": 0, "maximum": 65535 },
+    "ip": {
+      "type": "string",
+      "maxLength": 45,
+      "anyOf": [{ "format": "ipv4" }, { "format": "ipv6" }]
+    },
+    "hostname": { "type": "string", "minLength": 1, "maxLength": 253 },
+
+    "exec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pid", "ppid", "path", "argv"],
+      "properties": {
+        "pid": { "$ref": "#/$defs/pid" },
+        "ppid": { "$ref": "#/$defs/pid" },
+        "uid": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "path": { "$ref": "#/$defs/path" },
+        "argv": { "type": "array", "maxItems": 256, "items": { "type": "string", "maxLength": 4096 } },
+        "argv_truncated": { "type": "boolean" },
+        "cwd": { "$ref": "#/$defs/path" },
+        "exit_code": { "type": "integer", "minimum": -1, "maximum": 255 }
+      }
+    },
+
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "path"],
+      "properties": {
+        "op": { "enum": ["open", "read", "write", "create", "unlink", "rename", "chmod", "mkdir", "symlink"] },
+        "path": { "$ref": "#/$defs/path" },
+        "new_path": { "$ref": "#/$defs/path", "description": "Target for rename and symlink." },
+        "pid": { "$ref": "#/$defs/pid" },
+        "flags": { "type": "array", "maxItems": 16, "items": { "type": "string", "pattern": "^O_[A-Z_]{1,20}$" } },
+        "mode": { "type": "string", "pattern": "^0[0-7]{3,4}$" },
+        "bytes": { "type": "integer", "minimum": 0 }
+      },
+      "allOf": [
+        { "if": { "properties": { "op": { "enum": ["rename", "symlink"] } } }, "then": { "required": ["new_path"] } }
+      ]
+    },
+
+    "net": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "proto", "dst_ip", "dst_port"],
+      "properties": {
+        "op": { "enum": ["connect", "close"] },
+        "proto": { "enum": ["tcp", "udp", "icmp"] },
+        "src_ip": { "$ref": "#/$defs/ip" },
+        "src_port": { "$ref": "#/$defs/port" },
+        "dst_ip": { "$ref": "#/$defs/ip" },
+        "dst_port": { "$ref": "#/$defs/port" },
+        "sni": { "$ref": "#/$defs/hostname" },
+        "http_host": { "$ref": "#/$defs/hostname" },
+        "allowed": { "type": "boolean" },
+        "bytes_out": { "type": "integer", "minimum": 0 },
+        "bytes_in": { "type": "integer", "minimum": 0 },
+        "duration_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "dns": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["qname", "qtype", "allowed"],
+      "properties": {
+        "qname": { "$ref": "#/$defs/hostname" },
+        "qtype": { "type": "string", "pattern": "^[A-Z0-9]{1,10}$" },
+        "allowed": { "type": "boolean" },
+        "rcode": { "type": "string", "pattern": "^[A-Z]{1,10}$" },
+        "answers": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/ip" } },
+        "ttl": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "policyDenied": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "target", "reason"],
+      "properties": {
+        "policy": { "enum": ["net", "dns", "exec", "file"] },
+        "target": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "What was denied: a domain, ip:port, path, ..." },
+        "reason": { "enum": ["not_allowlisted", "blocked_range", "metadata", "direct_ip", "sni_mismatch", "net_none", "rate_limited"] },
+        "rule": { "type": "string", "maxLength": 256 }
+      }
+    },
+
+    "honeytoken": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["token_id", "token_kind", "trigger"],
+      "properties": {
+        "token_id": { "type": "string", "pattern": "^ht_[0-9A-Za-z]{1,40}$" },
+        "token_kind": { "enum": ["ssh_key", "aws_credentials", "env_api_key", "browser_cookies"] },
+        "trigger": {
+          "enum": ["read", "egress_dns", "egress_sni", "egress_plaintext"],
+          "description": "read: a guest process opened the token file. egress_*: the token value left the sandbox (red flag)."
+        },
+        "path": { "$ref": "#/$defs/path" },
+        "pid": { "$ref": "#/$defs/pid" },
+        "dst": { "type": "string", "maxLength": 300, "description": "Where it was sent: hostname or ip:port." },
+        "related_event": { "$ref": "#/$defs/eventId" }
+      },
+      "allOf": [
+        { "if": { "properties": { "trigger": { "const": "read" } } }, "then": { "required": ["path"] }, "else": { "required": ["dst"] } }
+      ]
+    }
+  }
+}

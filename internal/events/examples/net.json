@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "id": "ev_03c9e50bd4f6618a0c3d4e5f6a7b8c9d",
+  "ts": "2026-11-23T07:00:04.002117Z",
+  "sandbox": "sb-7f3k2q",
+  "kind": "net",
+  "source": "host",
+  "data": {
+    "op": "connect",
+    "proto": "tcp",
+    "src_ip": "10.88.0.2",
+    "src_port": 51744,
+    "dst_ip": "151.101.0.223",
+    "dst_port": 443,
+    "sni": "registry.npmjs.org",
+    "allowed": true
+  }
+}

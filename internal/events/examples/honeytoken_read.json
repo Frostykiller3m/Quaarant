@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "id": "ev_06fc283e07294cbd3f6a7b8c9d0e1f2a",
+  "ts": "2026-11-23T07:00:03.551890Z",
+  "sandbox": "sb-7f3k2q",
+  "kind": "honeytoken",
+  "source": "guest",
+  "data": {
+    "token_id": "ht_aws01",
+    "token_kind": "aws_credentials",
+    "trigger": "read",
+    "path": "/home/sandbox/.aws/credentials",
+    "pid": 431,
+    "related_event": "ev_02b8d4fac3e5507f9b2c3d4e5f6a7b8c"
+  }
+}
