@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "id": "ev_070d394f183a5dce4a7b8c9d0e1f2a3b",
+  "ts": "2026-11-23T07:00:05.730101Z",
+  "sandbox": "sb-7f3k2q",
+  "kind": "honeytoken",
+  "source": "host",
+  "data": {
+    "token_id": "ht_aws01",
+    "token_kind": "aws_credentials",
+    "trigger": "egress_dns",
+    "dst": "x7f2.exfil-collector.example",
+    "related_event": "ev_04da061ce5072a9b1d4e5f6a7b8c9d0e"
+  }
+}

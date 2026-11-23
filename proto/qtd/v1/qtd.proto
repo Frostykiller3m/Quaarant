@@ -1,0 +1,246 @@
+// qtd API, version 1.
+//
+// qt (and later the MCP server and Python SDK) talk to qtd over a unix socket
+// (/run/quarantine/qtd.sock, peer-credential checked) or, with --host, over mTLS (M7).
+//
+// Conventions:
+// - Sandbox ids match ^[a-z0-9][a-z0-9-]{0,62}$.
+// - File transfer is always a tar stream, chunked into messages of at most 1 MiB.
+// - Events are carried as their schema-validated JSON (internal/events/schema/v1.json), so
+//   there is exactly one definition of the event format.
+syntax = "proto3";
+
+package qtd.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/qt-dev/quarantine/internal/api/qtd/v1;qtdv1";
+
+service SandboxService {
+  // Create pulls/prepares the image and starts a new sandbox.
+  rpc Create(CreateRequest) returns (CreateResponse);
+  // Exec runs a process. The first client message must be `start`; later ones carry stdin,
+  // terminal resizes and signals. The server streams output and ends with `exit`.
+  rpc Exec(stream ExecRequest) returns (stream ExecResponse);
+  // CopyIn extracts a tar stream into a directory inside the sandbox. The first message must
+  // be `header`.
+  rpc CopyIn(stream CopyInRequest) returns (CopyInResponse);
+  // CopyOut streams a path from inside the sandbox as a tar archive.
+  rpc CopyOut(CopyOutRequest) returns (stream CopyOutResponse);
+  // Diff lists filesystem changes against the base image, or against another sandbox.
+  rpc Diff(DiffRequest) returns (DiffResponse);
+  // Events streams the sandbox's event log, optionally following new events.
+  rpc Events(EventsRequest) returns (stream EventsResponse);
+  // Snapshot captures a sandbox (disk, and memory on backends that support it).
+  rpc Snapshot(SnapshotRequest) returns (SnapshotResponse);
+  // Fork clones a running sandbox into N copies with fresh identities.
+  rpc Fork(ForkRequest) returns (ForkResponse);
+  // Destroy stops a sandbox and removes everything it left in the data dir. Idempotent.
+  rpc Destroy(DestroyRequest) returns (DestroyResponse);
+  // List returns known sandboxes.
+  rpc List(ListRequest) returns (ListResponse);
+}
+
+enum Isolation {
+  ISOLATION_UNSPECIFIED = 0; // qtd picks (doctor's recommendation)
+  ISOLATION_GVISOR = 1;
+  ISOLATION_VM = 2;
+}
+
+enum SandboxState {
+  SANDBOX_STATE_UNSPECIFIED = 0;
+  SANDBOX_STATE_CREATED = 1;
+  SANDBOX_STATE_RUNNING = 2;
+  SANDBOX_STATE_PAUSED = 3;
+  SANDBOX_STATE_STOPPED = 4;
+}
+
+// Capability mirrors internal/backend.Capabilities.
+enum Capability {
+  CAPABILITY_UNSPECIFIED = 0;
+  CAPABILITY_MEMORY_SNAPSHOT = 1;
+  CAPABILITY_DISK_SNAPSHOT = 2;
+  CAPABILITY_FORK = 3;
+  CAPABILITY_PTY = 4;
+  CAPABILITY_GUEST_KERNEL = 5;
+  CAPABILITY_SYSCALL_EVENTS = 6;
+}
+
+message Limits {
+  uint32 cpu_millis = 1; // 1000 = one CPU; 0 = default
+  uint64 memory_bytes = 2;
+  uint32 pids = 3;
+  uint64 disk_bytes = 4;
+}
+
+// NetPolicy is the egress policy, enforced on the host (M3).
+message NetPolicy {
+  enum Mode {
+    MODE_UNSPECIFIED = 0; // treated as NONE
+    MODE_NONE = 1; // loopback only
+    MODE_ALLOW = 2; // only allow_domains (DNS + SNI checked)
+    MODE_LOG = 3; // everything allowed, everything recorded
+  }
+  Mode mode = 1;
+  repeated string allow_domains = 2;
+}
+
+message Sandbox {
+  string id = 1;
+  string image = 2; // resolved reference with digest
+  Isolation isolation = 3;
+  SandboxState state = 4;
+  google.protobuf.Timestamp created_at = 5;
+  Limits limits = 6;
+  NetPolicy net = 7;
+  repeated Capability capabilities = 8;
+  map<string, string> labels = 9;
+  string parent_id = 10; // set for forks and restores
+}
+
+message CreateRequest {
+  string image = 1; // e.g. "alpine", "python:3.13-slim", or a digest reference
+  Isolation isolation = 2;
+  Limits limits = 3;
+  NetPolicy net = 4;
+  repeated string env = 5; // KEY=VALUE
+  string workdir = 6;
+  string hostname = 7;
+  map<string, string> labels = 8;
+  bool honeytokens = 9; // plant per-sandbox honeytokens (M4)
+}
+
+message CreateResponse {
+  Sandbox sandbox = 1;
+}
+
+message WindowSize {
+  uint32 rows = 1;
+  uint32 cols = 2;
+}
+
+message ExecRequest {
+  message Start {
+    string sandbox_id = 1;
+    repeated string argv = 2;
+    repeated string env = 3;
+    string workdir = 4;
+    bool tty = 5;
+    WindowSize size = 6;
+  }
+  oneof msg {
+    Start start = 1;
+    bytes stdin = 2;
+    bool close_stdin = 3;
+    WindowSize resize = 4;
+    int32 signal = 5; // Linux signal number
+  }
+}
+
+message ExecResponse {
+  message Exit {
+    int32 code = 1; // -1 when killed by a signal
+    int32 signal = 2;
+  }
+  oneof msg {
+    bytes stdout = 1;
+    bytes stderr = 2; // never sent with tty=true
+    Exit exit = 3;
+  }
+}
+
+message CopyInRequest {
+  message Header {
+    string sandbox_id = 1;
+    string dir = 2; // destination directory inside the sandbox
+  }
+  oneof msg {
+    Header header = 1;
+    bytes tar_chunk = 2;
+  }
+}
+
+message CopyInResponse {
+  uint64 bytes = 1;
+  uint32 files = 2;
+}
+
+message CopyOutRequest {
+  string sandbox_id = 1;
+  string path = 2;
+}
+
+message CopyOutResponse {
+  bytes tar_chunk = 1;
+}
+
+message DiffRequest {
+  string sandbox_id = 1;
+  string against_sandbox_id = 2; // empty = the base image
+}
+
+message Change {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_ADDED = 1;
+    KIND_MODIFIED = 2;
+    KIND_DELETED = 3;
+  }
+  string path = 1;
+  Kind kind = 2;
+  uint32 mode = 3;
+  uint64 size = 4;
+  string sha256 = 5; // hex; empty for deleted entries and directories
+}
+
+message DiffResponse {
+  repeated Change changes = 1;
+}
+
+message EventsRequest {
+  string sandbox_id = 1;
+  bool follow = 2;
+  string after_event_id = 3; // resume after this id; empty = from the start
+  repeated string kinds = 4; // filter, e.g. ["net","dns"]; empty = all
+}
+
+message EventsResponse {
+  string id = 1;
+  string kind = 2;
+  bytes event_json = 3; // one schema v1 event, validated by qtd before sending
+}
+
+message SnapshotRequest {
+  string sandbox_id = 1;
+  string name = 2;
+  bool include_memory = 3; // requires CAPABILITY_MEMORY_SNAPSHOT
+}
+
+message SnapshotResponse {
+  string snapshot_id = 1;
+  bool includes_memory = 2;
+}
+
+message ForkRequest {
+  string sandbox_id = 1;
+  uint32 count = 2; // 1..64
+  map<string, string> labels = 3; // applied to every child
+}
+
+message ForkResponse {
+  repeated Sandbox sandboxes = 1;
+}
+
+message DestroyRequest {
+  string sandbox_id = 1;
+}
+
+message DestroyResponse {}
+
+message ListRequest {
+  map<string, string> label_selector = 1; // all must match
+}
+
+message ListResponse {
+  repeated Sandbox sandboxes = 1;
+}

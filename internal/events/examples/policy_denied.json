@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "id": "ev_05eb172df6183bac2e5f6a7b8c9d0e1f",
+  "ts": "2026-11-23T07:00:05.912330Z",
+  "sandbox": "sb-7f3k2q",
+  "kind": "policy_denied",
+  "source": "host",
+  "data": {
+    "policy": "net",
+    "target": "169.254.169.254:80",
+    "reason": "metadata"
+  }
+}

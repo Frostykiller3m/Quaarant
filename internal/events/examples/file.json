@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "id": "ev_02b8d4fac3e5507f9b2c3d4e5f6a7b8c",
+  "ts": "2026-11-23T07:00:03.551201Z",
+  "sandbox": "sb-7f3k2q",
+  "kind": "file",
+  "source": "guest",
+  "data": {
+    "op": "open",
+    "path": "/home/sandbox/.aws/credentials",
+    "pid": 431,
+    "flags": ["O_RDONLY"]
+  }
+}

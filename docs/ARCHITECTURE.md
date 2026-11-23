@@ -28,7 +28,7 @@ piece gets built.
 - **qt** is a thin CLI. It parses flags, calls qtd, and renders output. It holds no sandbox state.
 - **qtd** owns every sandbox. It listens on `/run/quarantine/qtd.sock` and checks the caller's
   peer credentials (SO_PEERCRED: the caller must be root or in the `quarantine` group). The API is
-  in `proto/qtd.proto` and has these calls: Create, Exec (streaming), CopyIn/CopyOut, Diff,
+  in `proto/qtd/v1/qtd.proto` (service `qtd.v1.SandboxService`) and has these calls: Create, Exec (streaming), CopyIn/CopyOut, Diff,
   Events (stream), Snapshot, Fork, Destroy, List.
 - **qt-agent** runs inside the microVM as PID 1's child and talks to qtd over vsock. It is
   untrusted once guest code has run. qtd validates every message, limits message sizes, and
@@ -63,13 +63,22 @@ nftables sets, proxy and resolver. Tests check that nothing is left behind.
 
 ## Events
 
-Each event is one JSON line with a versioned schema (`internal/events`, M0-T2). Every event
+Each event is one JSON line with a versioned schema: `internal/events/schema/v1.json` (JSON Schema
+2020-12), with examples in `internal/events/examples/`. Every event
 carries `v`, `id`, `ts`, `sandbox`, `kind` and `source` (host or guest), plus fields specific to
 its kind. The kinds are `exec`, `file`, `net`, `dns`, `policy_denied` and `honeytoken`.
 
 - In gvisor, events come from runsc runtime monitoring and the host.
 - In vm, the agent reports exec events (proc connector) and file events (fanotify). These count
   as guest claims. Network and DNS events always come from the host.
+- The schema enforces this: a `net`, `dns`, `policy_denied` or honeytoken-egress event with
+  `source: guest` is invalid. Every string and array has a size limit, unknown fields are
+  rejected, and a line may be at most 256 KiB.
+- Versioning: `v` is the major version. Within v1, only new optional fields may be added. Any
+  other change makes v2, with a new `schema/v2.json`, and readers accept both versions while
+  the migration runs.
+- The gRPC `Events` stream carries the validated JSON bytes unchanged. Only one definition of
+  the format exists.
 
 ## Network policy (host side)
 
@@ -103,9 +112,9 @@ In every mode, LAN, host, link-local and cloud metadata addresses are unreachabl
 | `cmd/qt`, `cmd/qtd`, `cmd/qt-agent` | thin `main` packages | M0-T1 |
 | `internal/version` | build metadata (ldflags) | M0-T1 |
 | `internal/cli` | cobra commands | M0-T1 |
-| `proto/`, `internal/api` | qtd gRPC API | M0-T2 |
-| `internal/backend` | Backend interface and capabilities | M0-T2 |
-| `internal/events` | schema, validator, writer and reader | M0-T2 |
+| `proto/qtd/v1`, `internal/api/qtd/v1` | qtd gRPC API (generated code committed) | M0-T2 |
+| `internal/backend`, `internal/backend/fake` | Backend interface, capabilities, in-memory fake | M0-T2 |
+| `internal/events` | schema, types, validator (M0-T2); writer and follow reader (M1-T3) | M0-T2 |
 | `internal/doctor` | host capability checks | M0-T2 |
 | `internal/daemon` | qtd server, registry, socket auth | M1-T1 |
 | `internal/image` | OCI pull/unpack, ext4 conversion | M1-T1 / M2-T1 |

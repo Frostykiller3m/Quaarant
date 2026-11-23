@@ -20,7 +20,10 @@ Read `docs/ARCHITECTURE.md` for the design and `docs/BUILD_PLAN.md` for the task
 make build        # bin/qt, bin/qtd, bin/qt-agent (host OS)
 make build-linux  # bin/linux-{amd64,arm64}/..., CGO_ENABLED=0
 make test         # go test -race ./...
-make vet lint     # go vet, golangci-lint (v2)
+make vet lint     # go vet, golangci-lint (v2); lint with GOOS=linux too for *_linux.go
+make proto        # regenerate internal/api from proto/ (make tools installs pinned buf + plugins)
+make agent-deps   # fails if qt-agent links anything outside stdlib + internal/
+make check        # everything CI runs
 QT_ITEST=1 go test ./...   # integration tests (need runsc / KVM / root) — skipped otherwise
 ```
 
@@ -39,9 +42,18 @@ QT_ITEST=1 go test ./...   # integration tests (need runsc / KVM / root) — ski
 8. Least privilege by default: non-root guest user, no capabilities, seccomp, cgroup limits,
    `--net=none` unless asked.
 
+## Contracts (M0-T2) — change deliberately
+
+- `proto/qtd/v1/qtd.proto`: the qtd API. Generated code in `internal/api/qtd/v1` is committed;
+  run `make proto` after editing. Never break v1 wire compatibility (`buf breaking`).
+- `internal/backend`: the `Backend` interface + `Capabilities`. Check with `backend.Require`;
+  unsupported features return errors wrapping `errors.ErrUnsupported`.
+- `internal/events/schema/v1.json`: the event schema (source of truth). Update the Go types,
+  `examples/` and tests together; additive optional fields only within v1.
+
 ## Code conventions
 
-- Go 1.23+. Everything non-`main` lives under `internal/`. `cmd/*/main.go` stays thin.
+- Go 1.26+ (oldest supported Go release; current x/sys and grpc require it). Everything non-`main` lives under `internal/`. `cmd/*/main.go` stays thin.
 - Errors: wrap with `fmt.Errorf("doing x: %w", err)`; no panics outside `main` setup.
 - Tests: table-driven, fakes over mocks, no network in unit tests. Integration tests gated by
   `QT_ITEST=1` and `t.Skip` otherwise.
