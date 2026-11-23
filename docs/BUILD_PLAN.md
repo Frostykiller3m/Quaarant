@@ -8,7 +8,7 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
 
 ## M0 — Foundations
 
-- [ ] **M0-T1 · Repo + CI**
+- [x] **M0-T1 · Repo + CI**
       Done when: a Go module with `cmd/qt`, `cmd/qtd`, `cmd/qt-agent`, `internal/...`; a Makefile;
       golangci-lint, `go test ./...` and `go vet` in GitHub Actions; `qt version` works.
 

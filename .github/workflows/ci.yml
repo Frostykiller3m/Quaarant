@@ -1,0 +1,77 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: go mod tidy is clean
+        run: make tidy
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.15.0
+
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # minimum supported (go.mod) and current stable
+        go: ["1.23.x", stable]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      - name: vet
+        run: make vet
+      - name: test
+        run: make test
+
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # for git describe
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: build
+        run: |
+          make build-linux ARCHES=${{ matrix.arch }}
+          ls -l bin/linux-${{ matrix.arch }}
+      - name: qt-agent is statically linked
+        run: |
+          go version -m bin/linux-${{ matrix.arch }}/qt-agent | grep -q 'CGO_ENABLED=0'
+          file bin/linux-${{ matrix.arch }}/qt-agent | tee /dev/stderr | grep -q 'statically linked'
+      - name: smoke test (amd64)
+        if: matrix.arch == 'amd64'
+        run: |
+          bin/linux-amd64/qt version
+          bin/linux-amd64/qt version --json
+          bin/linux-amd64/qtd --version
+          bin/linux-amd64/qt-agent --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qt-linux-${{ matrix.arch }}
+          path: bin/linux-${{ matrix.arch }}/
+          if-no-files-found: error
