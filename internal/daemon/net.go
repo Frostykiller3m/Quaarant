@@ -10,6 +10,7 @@ import (
 	qtdv1 "github.com/Frostykiller3m/Quaarant/internal/api/qtd/v1"
 	"github.com/Frostykiller3m/Quaarant/internal/backend"
 	"github.com/Frostykiller3m/Quaarant/internal/events"
+	"github.com/Frostykiller3m/Quaarant/internal/honeytoken"
 	"github.com/Frostykiller3m/Quaarant/internal/netpol"
 )
 
@@ -115,7 +116,9 @@ func (s *Service) adoptLinks(ctx context.Context) {
 		if rec.Net == nil {
 			continue
 		}
-		if _, err := s.opts.Net.Adopt(rec.ID, netpol.Kind(rec.Net.Kind), rec.Net.Index, rec.Net.rules(), s.netEmitter(rec.ID)); err != nil {
+		rules := rec.Net.rules()
+		rules.Honey = honeytoken.NewMatcher(s.honeySet(rec.ID))
+		if _, err := s.opts.Net.Adopt(rec.ID, netpol.Kind(rec.Net.Kind), rec.Net.Index, rules, s.netEmitter(rec.ID)); err != nil {
 			s.log.Error("sandbox network not restored; its traffic is dropped", "id", rec.ID, "err", err)
 		}
 	}

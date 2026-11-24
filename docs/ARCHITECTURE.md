@@ -380,9 +380,30 @@ never without rules.
 
 ## Honeytokens and report
 
-- **Honeytokens (M4-T1).** qtd plants a unique fake SSH key, AWS credentials, `.env` keys and a
-  browser cookie DB in each sandbox. A read of one is an event. If a token turns up in DNS, SNI
-  or plaintext egress, that is a red-flag event.
+- **Honeytokens (M4-T1).** On by default for `qt run` (`--honeytokens=false` turns them off).
+  qtd generates a fresh set per sandbox (`internal/honeytoken`) under the sandbox user's
+  `$HOME`:
+  - `.ssh/id_ed25519`: an OpenSSH-format key;
+  - `.aws/credentials`: an `AKIA…` key ID and a secret;
+  - `.env`: OpenAI, Stripe and GitHub-style keys and a database URL;
+  - `.config/google-chrome/Default/Cookies`: a valid SQLite database whose `cookies` table
+    has session cookies in the clear.
+
+  They are planted right after start through the backend's `CopyIn` (the sandbox user's,
+  0600, dated 37 days back) and saved in `honeytokens.json`. `qt diff` hides them while their
+  content is unchanged.
+  - **Read:** when the event log writes a `file` open of a token path, it adds a `honeytoken`
+    event (`trigger: read`) that cites the file event (`related_event`) and keeps its
+    source. That is host for gvisor and a guest claim for vm. One event per token and
+    process.
+  - **Egress** (host, red flags): the resolver checks every query name and the proxy every
+    SNI (case-insensitive, dots ignored, so a value split over labels still matches). The
+    proxy also checks the plaintext client-to-server stream of every non-TLS connection,
+    including the first bytes of connections the policy refuses. Each value is matched raw,
+    as hex, as base64 and base64url at every alignment, and as base32. A hit is a
+    `honeytoken` event with `egress_dns`, `egress_sni` or `egress_plaintext` and the
+    destination. The same sighting within 10 s is recorded once. TLS bodies are not
+    inspected.
 - **Report (M4-T2).** The pipeline compacts the events, then asks Claude for findings through a
   forced tool call with a strict schema. Event data goes to Claude as escaped, untrusted data.
   A validator drops any finding whose evidence ids are missing or of the wrong kind. Without an
@@ -412,7 +433,7 @@ never without rules.
 | `internal/cgroups` | the cgroup v2 parent for sandboxes | M2-T1 |
 | `scripts/build-kernel.sh`, `kernel/` | reproducible guest kernel | M2-T1 |
 | `internal/netpol` | sandbox links (netns/veth, tap), nftables, resolver, SNI/Host proxy, nflog refusals | M3 |
-| `internal/honeytoken` | plant and detect | M4-T1 |
+| `internal/honeytoken` | per-sandbox fake credentials, SQLite cookie DB, matcher for raw and encoded values | M4-T1 |
 | `internal/report` | compaction, Claude, rules, validator | M4-T2 |
 | `internal/vet` | `qt run <git-url>` flow | M5 |
 | `internal/mcp`, `sdk/python` | agent front door | M6-T2 |

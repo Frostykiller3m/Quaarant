@@ -55,6 +55,19 @@ type eventLog struct {
 	now     func() time.Time
 	rate    float64 // eventRate; tests lower it
 	burst   float64
+	derive  func(events.Event) []derived // events implied by one just written (honeytoken reads)
+}
+
+// derived is an event implied by another.
+type derived struct {
+	src events.Source
+	p   events.Payload
+}
+
+func (l *eventLog) setDerive(f func(events.Event) []derived) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.derive = f
 }
 
 func newEventLog(path, sandbox string, log *slog.Logger) *eventLog {
@@ -67,51 +80,63 @@ func newEventLog(path, sandbox string, log *slog.Logger) *eventLog {
 
 // Emit implements backend.EventSink.
 func (l *eventLog) Emit(_ context.Context, src events.Source, p events.Payload) error {
+	ev, derive, err := l.write(src, p)
+	if err != nil || derive == nil {
+		return err
+	}
+	for _, d := range derive(ev) {
+		_, _, _ = l.write(d.src, d.p)
+	}
+	return nil
+}
+
+// write appends one event and returns it with the derive hook in force.
+func (l *eventLog) write(src events.Source, p events.Payload) (events.Event, func(events.Event) []derived, error) {
 	ev, err := events.New(l.sandbox, src, time.Now().UTC(), p)
 	if err != nil {
-		return fmt.Errorf("build event: %w", err)
+		return ev, nil, fmt.Errorf("build event: %w", err)
 	}
 	line, err := json.Marshal(ev)
 	if err != nil {
-		return fmt.Errorf("encode event: %w", err)
+		return ev, nil, fmt.Errorf("encode event: %w", err)
 	}
 	if _, err := events.Validate(line); err != nil {
 		l.drop("invalid", err)
-		return fmt.Errorf("event fails the schema: %w", err)
+		return ev, nil, fmt.Errorf("event fails the schema: %w", err)
 	}
 	line = append(line, '\n')
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.closed {
-		return errLogClosed
+		return ev, nil, errLogClosed
 	}
 	now := l.now()
 	l.tokens = min(l.burst, l.tokens+now.Sub(l.last).Seconds()*l.rate)
 	l.last = now
 	if l.tokens < 1 {
 		l.dropLocked("rate", errRateLimited)
-		return errRateLimited
+		return ev, nil, errRateLimited
 	}
 	if l.size+int64(len(line)) > maxEventBytes {
 		l.dropLocked("size", errEventLogFull)
-		return errEventLogFull
+		return ev, nil, errEventLogFull
 	}
 	if l.f == nil {
 		f, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
-			return fmt.Errorf("open event log: %w", err)
+			return ev, nil, fmt.Errorf("open event log: %w", err)
 		}
 		l.f = f
 	}
 	if _, err := l.f.Write(line); err != nil { // one write per line: followers never see half
-		return fmt.Errorf("write event log: %w", err)
+		return ev, nil, fmt.Errorf("write event log: %w", err)
 	}
 	l.tokens--
 	l.size += int64(len(line))
 	close(l.notify)
 	l.notify = make(chan struct{})
-	return nil
+	return ev, l.derive, nil
 }
 
 func (l *eventLog) drop(reason string, err error) {

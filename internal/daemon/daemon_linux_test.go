@@ -287,7 +287,6 @@ func TestCreateValidation(t *testing.T) {
 	}{
 		{"vm unavailable", &qtdv1.CreateRequest{Image: "alpine", Isolation: qtdv1.Isolation_ISOLATION_VM}, codes.FailedPrecondition},
 		{"net allow", &qtdv1.CreateRequest{Image: "alpine", Net: &qtdv1.NetPolicy{Mode: qtdv1.NetPolicy_MODE_ALLOW, AllowDomains: []string{"pypi.org"}}}, codes.FailedPrecondition}, // no netpol manager in this Service
-		{"honeytokens", &qtdv1.CreateRequest{Image: "alpine", Honeytokens: true}, codes.Unimplemented},
 		{"tiny memory", &qtdv1.CreateRequest{Image: "alpine", Limits: &qtdv1.Limits{MemoryBytes: 1 << 20}}, codes.InvalidArgument},
 		{"disk limit", &qtdv1.CreateRequest{Image: "alpine", Limits: &qtdv1.Limits{DiskBytes: 1 << 30}}, codes.Unimplemented},
 		{"bad env", &qtdv1.CreateRequest{Image: "alpine", Env: []string{"NOEQUALS"}}, codes.InvalidArgument},

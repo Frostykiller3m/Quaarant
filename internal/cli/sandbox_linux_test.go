@@ -157,7 +157,7 @@ func TestCLIErrors(t *testing.T) {
 
 func TestCLICopyAndDiff(t *testing.T) {
 	socket, _, _ := qtd(t)
-	r := runQt(t, socket, "", "run", "-q", "alpine", "true")
+	r := runQt(t, socket, "", "run", "-q", "--honeytokens=false", "alpine", "true")
 	if r.code != 0 {
 		t.Fatalf("run: %+v", r)
 	}

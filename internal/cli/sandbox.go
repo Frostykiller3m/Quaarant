@@ -22,7 +22,7 @@ func newRunCommand(g *globals) *cobra.Command {
 		env, labels                               []string
 		cpus                                      float64
 		pids                                      int
-		rm, interactive, tty, quiet               bool
+		rm, interactive, tty, quiet, honeytokens  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "run [flags] IMAGE [--] [COMMAND [ARG...]]",
@@ -44,6 +44,7 @@ func newRunCommand(g *globals) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			req.Honeytokens = honeytokens
 			envs, err := parseEnvFlags(env)
 			if err != nil {
 				return err
@@ -97,6 +98,7 @@ func newRunCommand(g *globals) *cobra.Command {
 	f.StringArrayVar(&labels, "label", nil, "label KEY=VALUE (repeatable)")
 	f.BoolVar(&rm, "rm", false, "remove the sandbox when the command exits")
 	f.BoolVarP(&quiet, "quiet", "q", false, "do not print the sandbox id")
+	f.BoolVar(&honeytokens, "honeytokens", true, "plant fake credentials (SSH key, AWS, .env, browser cookies) in $HOME; reading or sending them is an event")
 	return cmd
 }
 

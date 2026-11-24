@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/Frostykiller3m/Quaarant/internal/events"
+	"github.com/Frostykiller3m/Quaarant/internal/honeytoken"
 )
 
 // Config configures a Manager.
@@ -83,6 +84,9 @@ func (m Mode) String() string {
 type Rules struct {
 	Mode  Mode
 	Allow []string // domains; each also allows its subdomains (ModeAllow)
+	// Honey, if set, finds the sandbox's honeytokens in DNS names, SNI and plaintext egress
+	// (each sighting is a red-flag honeytoken event).
+	Honey *honeytoken.Matcher
 }
 
 // MaxAllow bounds an allow-list.
@@ -113,7 +117,7 @@ func (r Rules) Normalize() (Rules, error) {
 		if len(r.Allow) > 0 {
 			return Rules{}, errors.New("netpol: log mode takes no allow-list")
 		}
-		return Rules{Mode: ModeLog}, nil
+		return Rules{Mode: ModeLog, Honey: r.Honey}, nil
 	case ModeAllow:
 	default:
 		return Rules{}, errors.New("netpol: unknown mode")
@@ -121,7 +125,7 @@ func (r Rules) Normalize() (Rules, error) {
 	if len(r.Allow) == 0 || len(r.Allow) > MaxAllow {
 		return Rules{}, fmt.Errorf("netpol: an allow-list needs 1-%d domains", MaxAllow)
 	}
-	out := Rules{Mode: ModeAllow}
+	out := Rules{Mode: ModeAllow, Honey: r.Honey}
 	seen := map[string]bool{}
 	for _, a := range r.Allow {
 		d, err := ParseDomain(a)
