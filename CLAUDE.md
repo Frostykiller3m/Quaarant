@@ -19,6 +19,7 @@ Read `docs/ARCHITECTURE.md` for the design and `docs/BUILD_PLAN.md` for the task
 ```sh
 make build        # bin/qt, bin/qtd, bin/qt-agent (host OS)
 make build-linux  # bin/linux-{amd64,arm64}/..., CGO_ENABLED=0
+make kernel       # guest kernel for --isolation=vm (scripts/build-kernel.sh, ~3 min)
 make test         # go test -race ./...
 make vet lint     # go vet, golangci-lint (v2); lint with GOOS=linux too for *_linux.go
 make proto        # regenerate internal/api from proto/ (make tools installs pinned buf + plugins)
@@ -28,7 +29,8 @@ sudo make itest   # unit + integration tests (QT_ITEST=1; need root, runsc, netw
 make build && sudo make install   # qt, qtd → /usr/local/bin, qt-agent → /usr/local/lib/quarantine, systemd unit
 ```
 
-Manual run: `sudo systemctl enable --now qtd`, be in the `quarantine` group, then
+Manual run: `sudo systemctl enable --now qtd`, be in the `quarantine` group (vm isolation also
+needs `make kernel` before `make install`, plus firecracker + jailer on PATH and /dev/kvm), then
 `qt run alpine -- sh -c 'echo hi'`, `qt shell <id>`, `qt cp ./dir <id>:/work`, `qt diff <id>`,
 `qt events -f <id>`, `qt ls`, `qt rm <id>`. Lint with
 `GOOS=windows` too: Windows must keep building.

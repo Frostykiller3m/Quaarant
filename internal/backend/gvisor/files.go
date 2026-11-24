@@ -11,12 +11,12 @@ import (
 	"strings"
 
 	"github.com/Frostykiller3m/Quaarant/internal/backend"
-	"github.com/Frostykiller3m/Quaarant/internal/image"
+	"github.com/Frostykiller3m/Quaarant/internal/safetar"
 	"github.com/Frostykiller3m/Quaarant/internal/workspace"
 )
 
 // CopyLimits bound one CopyIn (the tar comes from the qt user, but is unpacked as root).
-var CopyLimits = image.UnpackLimits{MaxBytes: 8 << 30, MaxEntries: 1_000_000}
+var CopyLimits = safetar.UnpackLimits{MaxBytes: 8 << 30, MaxEntries: 1_000_000}
 
 // diffOptions hide what qt and the runtime create, not the sandboxed code.
 var diffOptions = workspace.DiffOptions{
@@ -89,7 +89,7 @@ func (b *Backend) CopyIn(ctx context.Context, id, dir string, r io.Reader) error
 		return fmt.Errorf("gvisor: copy in: %s: %w", dir, err)
 	}
 	defer func() { _ = sub.Close() }()
-	if _, err := image.UnpackInto(ctxReader{ctx, r}, sub, CopyLimits, image.OwnedBy(uid, gid)); err != nil {
+	if _, err := safetar.UnpackInto(ctxReader{ctx, r}, sub, CopyLimits, safetar.OwnedBy(uid, gid)); err != nil {
 		return fmt.Errorf("gvisor: copy in: %w", err)
 	}
 	return nil
@@ -106,7 +106,7 @@ func (b *Backend) CopyOut(ctx context.Context, id, p string, w io.Writer) error 
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	if _, err := workspace.WriteTar(root, rel, ctxWriter{ctx, w}, workspace.DefaultTarLimits); err != nil {
+	if _, err := safetar.WriteTar(root, rel, ctxWriter{ctx, w}, safetar.DefaultTarLimits); err != nil {
 		return fmt.Errorf("gvisor: %w", err)
 	}
 	return nil
@@ -150,4 +150,95 @@ func (c ctxWriter) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return c.w.Write(p)
+}
+
+// commandExists resolves argv[0] in the sandbox's root (through os.Root, so the sandbox's
+// symlinks cannot point the lookup at the host). If the root can't be opened, it says yes
+// and lets runsc report the problem.
+func (b *Backend) commandExists(ctx context.Context, id, name string, env []string) bool {
+	if name == "" {
+		return true
+	}
+	_, root, err := b.openRootfs(ctx, id)
+	if err != nil {
+		return true
+	}
+	defer func() { _ = root.Close() }()
+	isExec := func(p string) bool {
+		fi, err := statInRoot(root, p)
+		return err == nil && fi.Mode().IsRegular() && fi.Mode()&0o111 != 0
+	}
+	if strings.Contains(name, "/") {
+		return !path.IsAbs(name) || isExec(name)
+	}
+	dirs := "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, "PATH="); ok {
+			dirs = v
+		}
+	}
+	for _, d := range strings.Split(dirs, ":") {
+		if path.IsAbs(d) && isExec(path.Join(d, name)) {
+			return true
+		}
+	}
+	return false
+}
+
+// notFound is a process that already failed the way the vm agent reports a missing command.
+func notFound(e backend.ExecSpec) backend.Process {
+	if w := e.Stderr; w != nil {
+		_, _ = fmt.Fprintf(w, "qt: %s: executable file not found in $PATH\n", e.Argv[0])
+	} else if e.TTY && e.Stdout != nil {
+		_, _ = fmt.Fprintf(e.Stdout, "qt: %s: executable file not found in $PATH\r\n", e.Argv[0])
+	}
+	return doneProcess{backend.ExitStatus{Code: 127}}
+}
+
+type doneProcess struct{ st backend.ExitStatus }
+
+func (d doneProcess) Wait(context.Context) (backend.ExitStatus, error) { return d.st, nil }
+func (doneProcess) Signal(int) error                                   { return nil }
+func (doneProcess) Resize(backend.WindowSize) error                    { return nil }
+
+// statInRoot stats p as the sandbox sees it: symlinks are followed with absolute targets
+// taken relative to the sandbox's root (os.Root alone refuses those as escapes). Every
+// step goes through root with Lstat, so nothing outside it is ever touched.
+func statInRoot(root *os.Root, p string) (os.FileInfo, error) {
+	p = path.Clean("/" + p)
+	for hops := 0; hops < 40; hops++ {
+		parts := strings.Split(strings.TrimPrefix(p, "/"), "/")
+		cur := "/"
+		redirected := false
+		for i, part := range parts {
+			if part == "" {
+				continue
+			}
+			next := path.Join(cur, part)
+			fi, err := root.Lstat(strings.TrimPrefix(next, "/"))
+			if err != nil {
+				return nil, err
+			}
+			if fi.Mode()&os.ModeSymlink != 0 {
+				target, err := root.Readlink(strings.TrimPrefix(next, "/"))
+				if err != nil {
+					return nil, err
+				}
+				if !path.IsAbs(target) {
+					target = path.Join(cur, target)
+				}
+				p = path.Clean("/" + path.Join(append([]string{target}, parts[i+1:]...)...))
+				redirected = true
+				break
+			}
+			if i == len(parts)-1 {
+				return fi, nil
+			}
+			cur = next
+		}
+		if !redirected {
+			return root.Lstat(".")
+		}
+	}
+	return nil, errors.New("too many levels of symbolic links")
 }

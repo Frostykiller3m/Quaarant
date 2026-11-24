@@ -1,4 +1,4 @@
-package workspace
+package safetar
 
 import (
 	"archive/tar"

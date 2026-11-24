@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/Frostykiller3m/Quaarant/internal/backend"
+	"github.com/Frostykiller3m/Quaarant/internal/backend/backendtest"
 	"github.com/Frostykiller3m/Quaarant/internal/events"
 	"github.com/Frostykiller3m/Quaarant/internal/image"
 )
@@ -577,4 +578,16 @@ func anyLine(lines, subs []string) bool {
 		}
 	}
 	return false
+}
+
+type gvisorSuite struct{ it *itest }
+
+func (s gvisorSuite) Backend() backend.Backend { return s.it.b }
+func (s gvisorSuite) Start(t *testing.T, id string, lim backend.Limits) backend.Spec {
+	return s.it.start(t, id, lim)
+}
+
+// TestITestSharedSuite: the suite --isolation=vm also passes.
+func TestITestSharedSuite(t *testing.T) {
+	backendtest.Run(t, gvisorSuite{setupITest(t)}, backendtest.Options{KernelPrefix: "4."})
 }

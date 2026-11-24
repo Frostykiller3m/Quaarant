@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/Frostykiller3m/Quaarant/internal/backend"
+	"github.com/Frostykiller3m/Quaarant/internal/backend/firecracker"
 	"github.com/Frostykiller3m/Quaarant/internal/backend/gvisor"
 	"github.com/Frostykiller3m/Quaarant/internal/image"
 	"github.com/Frostykiller3m/Quaarant/internal/version"
@@ -110,6 +111,10 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		runscRoot    = fl.String("runsc-root", "/run/quarantine/runsc", "runsc state directory")
 		agent        = fl.String("agent", "", "static qt-agent binary (default: next to qtd, then /usr/local/lib/quarantine/qt-agent)")
 		cgroupParent = fl.String("cgroup-parent", "/quarantine", "cgroup v2 parent for sandboxes")
+		fc           = fl.String("firecracker", "firecracker", "firecracker binary (vm isolation)")
+		jailer       = fl.String("jailer", "jailer", "firecracker jailer binary")
+		vmKernel     = fl.String("vm-kernel", "/usr/local/lib/quarantine/vmlinux", "guest kernel for vm isolation (scripts/build-kernel.sh)")
+		fcState      = fl.String("vm-state", "/run/quarantine/fc", "vm backend state directory")
 		debug        = fl.Bool("debug", false, "debug logging")
 	)
 	if err := fl.Parse(args); err != nil {
@@ -124,31 +129,47 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		level = slog.LevelDebug
 	}
 	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: level}))
-	if err := run(log, *socket, *dataDir, *group, *runsc, *runscRoot, *agent, *cgroupParent); err != nil {
+	cfg := runConfig{
+		socket: *socket, dataDir: *dataDir, group: *group, runsc: *runsc, runscRoot: *runscRoot, agent: *agent,
+		cgroupParent: *cgroupParent, firecracker: *fc, jailer: *jailer, vmKernel: *vmKernel, fcState: *fcState,
+	}
+	if err := run(log, cfg); err != nil {
 		log.Error("qtd failed", "err", err)
 		return 1
 	}
 	return 0
 }
 
-func run(log *slog.Logger, socket, dataDir, group, runsc, runscRoot, agent, cgroupParent string) error {
+type runConfig struct {
+	socket, dataDir, group, runsc, runscRoot, agent, cgroupParent string
+	firecracker, jailer, vmKernel, fcState                        string
+}
+
+func run(log *slog.Logger, c runConfig) error {
+	socket, dataDir, group := c.socket, c.dataDir, c.group
 	if os.Geteuid() != 0 {
 		return errors.New("qtd must run as root (it mounts overlays and manages cgroups)")
 	}
+	agentPath, err := findAgent(c.agent)
+	if err != nil {
+		return err
+	}
 	var backends []backend.Backend
-	if path, err := exec.LookPath(runsc); err != nil {
-		log.Warn("runsc not found; gvisor isolation unavailable", "runsc", runsc)
+	if path, err := exec.LookPath(c.runsc); err != nil {
+		log.Warn("runsc not found; gvisor isolation unavailable", "runsc", c.runsc)
 	} else {
-		agentPath, err := findAgent(agent)
-		if err != nil {
-			return err
-		}
-		b, err := gvisor.New(gvisor.Config{Runsc: path, StateDir: runscRoot, AgentPath: agentPath, CgroupParent: cgroupParent, Logger: log})
+		b, err := gvisor.New(gvisor.Config{Runsc: path, StateDir: c.runscRoot, AgentPath: agentPath, CgroupParent: c.cgroupParent, Logger: log})
 		if err != nil {
 			return fmt.Errorf("gvisor backend: %w", err)
 		}
 		backends = append(backends, b)
 		log.Info("backend ready", "isolation", b.Name(), "runsc", path, "agent", agentPath)
+	}
+	if b, why := vmBackend(c, agentPath, log); b != nil {
+		backends = append(backends, b)
+		log.Info("backend ready", "isolation", b.Name(), "kernel", c.vmKernel)
+	} else {
+		log.Warn("vm isolation unavailable", "reason", why)
 	}
 	svc, err := New(Options{
 		DataDir: dataDir, Backends: backends, Images: image.NewStore(filepath.Join(dataDir, "images")), Logger: log,
@@ -186,4 +207,34 @@ func findAgent(flagValue string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("qt-agent binary not found (tried %v); build it with `make build-linux` or pass --agent", candidates)
+}
+
+// vmBackend returns the Firecracker backend if everything it needs is here, else why not.
+func vmBackend(c runConfig, agentPath string, log *slog.Logger) (backend.Backend, string) {
+	f, err := os.OpenFile("/dev/kvm", os.O_RDWR, 0)
+	if err != nil {
+		return nil, fmt.Sprintf("/dev/kvm: %v", err)
+	}
+	_ = f.Close()
+	fc, err := exec.LookPath(c.firecracker)
+	if err != nil {
+		return nil, "firecracker not found"
+	}
+	jailer, err := exec.LookPath(c.jailer)
+	if err != nil {
+		return nil, "jailer not found"
+	}
+	if _, err := os.Stat(c.vmKernel); err != nil {
+		return nil, fmt.Sprintf("guest kernel %s: %v (scripts/build-kernel.sh, then make install)", c.vmKernel, err)
+	}
+	fc, _ = filepath.Abs(fc)
+	jailer, _ = filepath.Abs(jailer)
+	b, err := firecracker.New(firecracker.Config{
+		Firecracker: fc, Jailer: jailer, Kernel: c.vmKernel, AgentPath: agentPath,
+		StateDir: c.fcState, CgroupParent: c.cgroupParent, Logger: log,
+	})
+	if err != nil {
+		return nil, err.Error()
+	}
+	return b, ""
 }

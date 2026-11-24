@@ -31,6 +31,11 @@ type ImagePuller interface {
 	Pull(ctx context.Context, ref string) (image.Image, error)
 }
 
+// ext4Builder is implemented by image stores that can make an ext4 disk image (vm isolation).
+type ext4Builder interface {
+	Ext4(ctx context.Context, img image.Image) (string, error)
+}
+
 // Options configures the service.
 type Options struct {
 	DataDir  string // e.g. /var/lib/quarantine
@@ -205,8 +210,20 @@ func (s *Service) Create(ctx context.Context, req *qtdv1.CreateRequest) (*qtdv1.
 		_ = os.RemoveAll(ws)
 		return nil, status.Errorf(codes.Internal, "%v", err)
 	}
+	rootfs := img.RootFS
+	if iso == backend.IsolationVM { // the microVM boots from an ext4 disk image
+		eb, ok := s.opts.Images.(ext4Builder)
+		if !ok {
+			s.cleanup(id, be)
+			return nil, status.Error(codes.FailedPrecondition, "this image store cannot build disk images for vm isolation")
+		}
+		if rootfs, err = eb.Ext4(ctx, img); err != nil {
+			s.cleanup(id, be)
+			return nil, status.Errorf(codes.Internal, "vm disk image: %v", err)
+		}
+	}
 	spec := backend.Spec{
-		ID: id, Image: img.Ref, RootFS: img.RootFS, Workspace: ws, Hostname: hostname,
+		ID: id, Image: img.Ref, RootFS: rootfs, Workspace: ws, Hostname: hostname,
 		User: user, Env: env, Workdir: workdir, Limits: limits,
 		Network: backend.Network{None: true},
 		Events:  s.eventLogFor(id),

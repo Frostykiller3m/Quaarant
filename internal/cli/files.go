@@ -20,7 +20,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	qtdv1 "github.com/Frostykiller3m/Quaarant/internal/api/qtd/v1"
-	"github.com/Frostykiller3m/Quaarant/internal/image"
+	"github.com/Frostykiller3m/Quaarant/internal/safetar"
 )
 
 // A sandbox location is ID:/abs/path. Ids are at least 2 characters, so a Windows drive
@@ -160,7 +160,7 @@ func copyOut(cmd *cobra.Command, g *globals, src, dst location, quiet bool) erro
 	if err := os.MkdirAll(dst.path, 0o755); err != nil { //nolint:gosec // G301: a normal user directory
 		return fmt.Errorf("create %s: %w", dst.path, err)
 	}
-	st, err := image.Unpack(pr, dst.path, image.DefaultUnpackLimits, false)
+	st, err := safetar.Unpack(pr, dst.path, safetar.DefaultUnpackLimits, false)
 	if err != nil {
 		return fmt.Errorf("unpack into %s: %w", dst.path, err)
 	}

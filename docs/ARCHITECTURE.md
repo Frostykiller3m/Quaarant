@@ -74,6 +74,48 @@ The two backends share integration tests, so the same command behaves the same o
   sandboxes again via `runsc state` (the bundle holds `qt.json`). After a host reboot they are
   `stopped`, and `qt rm` cleans them up.
 
+### vm backend (M2-T1)
+
+```
+ qtd ──jailer──▶ firecracker (chroot <ws>/j/firecracker/qt-<id>/root, own uid, cgroup, seccomp)
+  │                  │ boots vmlinux (qt kernel) + initrd.cpio (/init = qt-agent), disk.ext4 = /dev/vda
+  │                  ▼
+  └──vsock (v.sock, "CONNECT 1024")──▶ guest PID 1: qt-agent init2 ──▶ child: qt-agent serve
+                                                                        └─ spawn (drop privileges) ─▶ command
+```
+
+- **Guest kernel.** `scripts/build-kernel.sh` (`make kernel`) builds a pinned Linux 6.18 LTS
+  (Firecracker v1.18 supports 6.18 guests until 2028; its 6.1 support has ended).
+  `kernel/guest-x86_64.config` is merged on `make tinyconfig`: virtio-mmio, block, vsock,
+  entropy, ext4, initramfs, pty, serial console, KVM guest, ACPI, seccomp, IPv4/IPv6 without
+  the automatic `sit0` tunnel. No modules. The script checks that every option survived
+  Kconfig, pins the tarball's sha256, and fixes all build metadata: two builds give the same
+  vmlinux (checked).
+- **Disk.** `image.Store.Ext4` builds `rootfs.ext4` once per digest with `mkfs.ext4 -d`
+  (UUID and directory-hash seed from the digest, fixed times). Each sandbox gets a copy (a
+  reflink where the filesystem supports it), grown sparse to 4 GiB.
+- **Agent delivery.** qtd writes an initramfs holding only the static qt-agent (cached by its
+  hash). Stage 1 (`/init`) mounts `/dev/vda`, mounts a tmpfs at `/.qt`, copies itself there and
+  switches root, so qt's binary is never written to the sandbox's disk. Stage 2 (PID 1, root)
+  mounts `/proc`, `/sys`, `/dev/pts` and `/dev/shm`, sets the hostname from `qt.hostname=`,
+  brings up `lo`, reaps orphans, ignores signals, and supervises `qt-agent serve`.
+- **Least privilege in the guest.** Every command goes through `qt-agent spawn` on one locked
+  OS thread: `RLIMIT_NPROC`, `no_new_privs`, an empty capability bounding set,
+  `setgroups([])`/`setgid`/`setuid` to the sandbox user, then a seccomp filter (the gvisor
+  deny-list plus the new mount API, from x/sys's syscall tables), then `execve`. The VMM itself
+  runs under the jailer (chroot, uid 900000+, cgroup v2 `cpu.max`/`memory.max`/`pids.max`) with
+  Firecracker's own seccomp filters.
+- **Protocol.** `internal/agentproto` uses length-prefixed frames (max 1 MiB) with a JSON
+  request first, one vsock connection per operation (exec with stdio/TTY/resize/signals, copy
+  in/out, ping). Everything the agent sends is untrusted: frames are bounded, exit codes
+  clamped, and copy-out tars go through the same safe unpacker as everywhere else.
+- **Parity.** `internal/backend/backendtest` is one integration suite that both backends
+  pass: user, capabilities, `no_new_privs`, seccomp, hostname, loopback only, process limit,
+  read-only image, env/cwd, init that can't be killed from inside, TTY, signals, cancel,
+  copy in/out, exit 127 for a missing command.
+- qt boots from a `--config-file`, not the Firecracker Go SDK (no API calls are needed, and
+  the SDK would add about 30 modules).
+
 ## qtd and its socket
 
 qtd runs as root under systemd (`contrib/systemd/qtd.service`, `make install`). It listens on
@@ -228,7 +270,11 @@ In every mode, LAN, host, link-local and cloud metadata addresses are unreachabl
 | `internal/gvisorpb`, `third_party/gvisor` | gVisor monitoring protos (vendored) and generated Go | M1-T3 |
 | `internal/agent` | qt-agent code (gvisor init: `qt-agent pause`) | M1-T1 |
 | `internal/workspace` | upper-dir diff, tar out, inotify watcher (M1-T3) | M1-T2 |
-| `internal/backend/firecracker`, `internal/agentproto` | vm backend, vsock protocol | M2 |
+| `internal/backend/firecracker`, `internal/agentproto` | vm backend (jailer, initramfs, disks), vsock protocol | M2-T1 |
+| `internal/backend/backendtest` | integration suite every backend passes | M2-T1 |
+| `internal/safetar` | untrusted tar in/out (stdlib only: used by qt-agent too) | M2-T1 |
+| `internal/cgroups` | the cgroup v2 parent for sandboxes | M2-T1 |
+| `scripts/build-kernel.sh`, `kernel/` | reproducible guest kernel | M2-T1 |
 | `internal/netpol` | netns, nftables, resolver, SNI proxy | M3 |
 | `internal/honeytoken` | plant and detect | M4-T1 |
 | `internal/report` | compaction, Claude, rules, validator | M4-T2 |

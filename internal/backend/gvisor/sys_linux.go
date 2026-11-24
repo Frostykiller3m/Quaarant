@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -14,9 +13,10 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/Frostykiller3m/Quaarant/internal/backend"
+	"github.com/Frostykiller3m/Quaarant/internal/cgroups"
 )
 
-const cgroupRoot = "/sys/fs/cgroup"
+const cgroupRoot = cgroups.Root
 
 func mountOverlay(lower, upper, work, target string) error {
 	// metacopy/redirect_dir off: every changed file keeps its full content in upper, and renamed
@@ -54,39 +54,6 @@ func unmount(target string) error {
 			return nil
 		default:
 			return fmt.Errorf("unmount %s: %w", target, err)
-		}
-	}
-}
-
-// ensureCgroupParent creates the parent cgroup and delegates the cpu, memory and pids
-// controllers to its children (cgroup v2).
-func ensureCgroupParent(parent string) error {
-	dir := filepath.Join(cgroupRoot, parent)
-	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // G301: cgroupfs directory, mode is ignored
-		return fmt.Errorf("create %s: %w", dir, err)
-	}
-	for _, d := range []string{cgroupRoot, dir} {
-		for _, c := range []string{"cpu", "memory", "pids"} {
-			f := filepath.Join(d, "cgroup.subtree_control")
-			if err := os.WriteFile(f, []byte("+"+c), 0); err != nil {
-				return fmt.Errorf("enable %s in %s: %w", c, f, err)
-			}
-		}
-	}
-	return nil
-}
-
-func removeCgroup(path string) error {
-	dir := filepath.Join(cgroupRoot, path)
-	for i := 0; ; i++ {
-		err := unix.Rmdir(dir)
-		switch {
-		case err == nil, errors.Is(err, unix.ENOENT):
-			return nil
-		case errors.Is(err, unix.EBUSY) && i < 40:
-			time.Sleep(50 * time.Millisecond)
-		default:
-			return fmt.Errorf("remove cgroup %s: %w", dir, err)
 		}
 	}
 }
@@ -145,3 +112,6 @@ func control(f *os.File, fn func(fd int) error) error {
 func ttyProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
 }
+
+func ensureCgroupParent(parent string) error { return cgroups.EnsureParent(parent) }
+func removeCgroup(path string) error         { return cgroups.Remove(path) }

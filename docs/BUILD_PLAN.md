@@ -95,7 +95,7 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
 
 ## M2 — Firecracker backend
 
-- [ ] **M2-T1 · Guest kernel + rootfs + agent**
+- [x] **M2-T1 · Guest kernel + rootfs + agent**
       Done when: a reproducible script builds a minimal guest kernel (config in the repo) and
       converts OCI images to ext4; qt-agent runs as PID 1's child and talks over vsock;
       `qt run --isolation=vm alpine -- uname -a` shows our kernel.
@@ -107,6 +107,24 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
   chroot + uid + cgroup + seccomp. qt run --isolation=vm must behave exactly like gvisor for the
   same command (shared integration tests, both backends).
   ```
+
+  Done with these choices: guest kernel 6.18 (Firecracker v1.18 has ended 6.1 guest support);
+  Firecracker is driven by `--config-file` under the jailer, not firecracker-go-sdk (no API
+  calls needed; avoids ~30 modules). The agent arrives in an initramfs, so image disks never
+  hold qt's code. The kernel build is byte-reproducible (checked). Two ext4 builds hold the
+  same tree and filesystem identity but are not byte-identical (mke2fs 1.47.0 copies inode
+  ctime from the unpacked files); the cache by digest makes that matter only across hosts.
+
+  Follow-ups noted during M2-T1 (not done there):
+  - `qt run --rm --isolation=vm` takes ~2.2 s with a cached disk (boot is ~0.2 s): the full
+    disk copy (no reflink on ext4), resize2fs and teardown. M2-T2's golden snapshots and CoW
+    disks are the fix.
+  - `qt diff` is unsupported for vm until there are CoW disks (M2-T2).
+  - vm events (exec/file) arrive in M2-T3; the vm backend declares no CapSyscallEvents.
+  - CI skips the vm itests (no guest kernel there); build and cache the kernel in CI.
+  - arm64: the agent and seccomp tables are ready; the kernel config fragment is x86_64 only.
+  - A VM that outlives a qtd restart is found again through /run/quarantine/fc, but a host
+    reboot leaves it `stopped` (like gvisor).
 
 - [ ] **M2-T2 · Fast start**
       Done when: a "golden" snapshot per image; restore-to-exec under 300 ms (benchmark in
