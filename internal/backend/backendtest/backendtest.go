@@ -79,6 +79,7 @@ func Run(t *testing.T, env Env, opts Options) {
 		{"kernel", Sh("uname -r"), opts.KernelPrefix + "*", 0},
 		{"hostname", Sh("hostname"), "qt-shared\n", 0},
 		{"loopback only", Sh(`awk -F: 'NR>2{gsub(/ /,"",$1); print $1}' /proc/net/dev`), "lo\n", 0},
+		{"--net=none: no route out", Sh("echo hi | nc -w 2 1.1.1.1 80 2>/dev/null; echo rc=$?"), "rc=1\n", 0},
 		{"process limit visible", Sh("ulimit -u"), "64\n", 0},
 		{"image is read-only to the user", Sh("touch /etc/x 2>/dev/null; echo $?"), "1\n", 0},
 		{"exec env and cwd", backend.ExecSpec{Argv: []string{"/bin/sh", "-c", "echo $FOO; pwd"}, Env: []string{"FOO=bar"}, Workdir: "/tmp"}, "bar\n/tmp\n", 0},

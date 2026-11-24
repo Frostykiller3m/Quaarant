@@ -25,6 +25,7 @@ import (
 	"github.com/Frostykiller3m/Quaarant/internal/backend/backendtest"
 	"github.com/Frostykiller3m/Quaarant/internal/events"
 	"github.com/Frostykiller3m/Quaarant/internal/image"
+	"github.com/Frostykiller3m/Quaarant/internal/netpol"
 )
 
 // Integration tests: QT_ITEST=1, root, runsc on PATH, and network access to pull alpine.
@@ -85,13 +86,18 @@ func setupITest(t *testing.T) *itest {
 
 func (it *itest) start(t *testing.T, id string, lim backend.Limits) backend.Spec {
 	t.Helper()
+	return it.startNet(t, id, lim, backend.Network{None: true})
+}
+
+func (it *itest) startNet(t *testing.T, id string, lim backend.Limits, n backend.Network) backend.Spec {
+	t.Helper()
 	s := backend.Spec{
 		ID: id, Image: it.img.Ref, RootFS: it.img.RootFS,
 		Workspace: filepath.Join(it.data, "sandboxes", id),
 		Hostname:  "qt-" + id, User: "65534:65534",
 		Env:     []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/tmp"},
 		Limits:  lim,
-		Network: backend.Network{None: true},
+		Network: n,
 		Events:  nopSink{},
 	}
 	ctx := context.Background()
@@ -590,4 +596,15 @@ func (s gvisorSuite) Start(t *testing.T, id string, lim backend.Limits) backend.
 // TestITestSharedSuite: the suite --isolation=vm also passes.
 func TestITestSharedSuite(t *testing.T) {
 	backendtest.Run(t, gvisorSuite{setupITest(t)}, backendtest.Options{KernelPrefix: "4."})
+}
+
+func (gvisorSuite) Kind() netpol.Kind { return netpol.Netns }
+func (gvisorSuite) Owner(string) int  { return 0 }
+func (s gvisorSuite) StartNet(t *testing.T, id string, lim backend.Limits, n backend.Network) backend.Spec {
+	return s.it.startNet(t, id, lim, n)
+}
+
+// TestITestNetIsolation: probes from inside sandboxes on a netns link (M3-T1).
+func TestITestNetIsolation(t *testing.T) {
+	backendtest.RunNet(t, gvisorSuite{setupITest(t)})
 }

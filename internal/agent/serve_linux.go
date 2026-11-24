@@ -291,5 +291,10 @@ func configure(c *agentproto.Configure) error {
 			return fmt.Errorf("configure: entropy: %w", werr)
 		}
 	}
+	if c.Net != nil {
+		if err := configureNet(c.Net); err != nil {
+			return fmt.Errorf("configure: %w", err)
+		}
+	}
 	return nil
 }

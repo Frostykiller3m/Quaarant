@@ -69,6 +69,7 @@ func fullHost() fakeEnv {
 			"jailer":      "Jailer v1.12.0",
 			"runsc":       "runsc version release-20261110.0\nspec: 1.1.0-rc.1",
 			"nft":         "nftables v1.0.9 (Old Doc Yak #3)",
+			"ip":          "ip utility, iproute2-6.1.0",
 		},
 		cgMounted: true, cgCtrls: []string{"cpuset", "cpu", "io", "memory", "hugetlb", "pids", "rdma"},
 		reflinkOK: true, reflinkFS: "btrfs",
@@ -142,6 +143,11 @@ func TestRun(t *testing.T) {
 			name: "cgroup missing pids controller",
 			env:  func() fakeEnv { f := fullHost(); f.cgCtrls = []string{"cpu", "memory"}; return f }(), wantRec: "",
 			want: map[string]Status{CheckCgroup: Fail}, wantText: []string{"missing controllers: pids"},
+		},
+		{
+			name: "nft without iproute2",
+			env:  func() fakeEnv { f := fullHost(); delete(f.bins, "ip"); return f }(), wantRec: "vm",
+			want: map[string]Status{CheckNftables: Warn}, wantText: []string{"ip not found", "apt install iproute2"},
 		},
 		{
 			name: "cgroup unreadable",

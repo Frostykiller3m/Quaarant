@@ -88,8 +88,26 @@ type boxMeta struct {
 	Hostname string    `json:"hostname"`
 	Golden   string    `json:"golden,omitempty"` // restored from this golden snapshot
 	Disk     diskRef   `json:"disk"`
+	Net      *netMeta  `json:"net,omitempty"` // nil: --net=none (no NIC at all)
 	Created  time.Time `json:"created"`
 }
+
+// netMeta is the VM's link: qtd's tap and the guest's addressing on it.
+type netMeta struct {
+	Tap     string `json:"tap"`
+	Addr    string `json:"addr"`
+	Gateway string `json:"gateway"`
+}
+
+func (n *netMeta) agent() *agentproto.Net {
+	if n == nil {
+		return nil
+	}
+	return &agentproto.Net{Addr: n.Addr, Gateway: n.Gateway}
+}
+
+// guestMAC is every VM's eth0 MAC (locally administered); each VM is alone on its tap.
+const guestMAC = "06:00:ac:10:00:02"
 
 // stateFile (<StateDir>/<id>.json) lets a restarted qtd find a running VM.
 type stateFile struct {
@@ -144,8 +162,8 @@ func (b *Backend) Create(ctx context.Context, s backend.Spec) (err error) {
 	if err := s.Validate(); err != nil {
 		return fmt.Errorf("firecracker: %w", err)
 	}
-	if !s.Network.None {
-		return fmt.Errorf("firecracker: network attachment: %w (arrives in M3; use --net=none)", errors.ErrUnsupported)
+	if !s.Network.None && s.Network.TapDevice == "" {
+		return fmt.Errorf("firecracker: a network link must be a tap device: %w", errors.ErrUnsupported)
 	}
 	if !hostnameRe.MatchString(s.Hostname) { // it goes on the kernel command line
 		return fmt.Errorf("firecracker: invalid hostname %.64q", s.Hostname)
@@ -160,6 +178,9 @@ func (b *Backend) Create(ctx context.Context, s backend.Spec) (err error) {
 		return fmt.Errorf("firecracker: sandbox %s already exists", s.ID)
 	}
 	bx := &box{id: s.ID, workspace: s.Workspace, meta: boxMeta{Env: s.Env, Workdir: s.Workdir, UID: uid, GID: gid, PIDs: s.Limits.PIDs, CPU: s.Limits.CPUMillis, Memory: s.Limits.MemoryBytes, Hostname: s.Hostname, Created: time.Now().UTC()}, sink: s.Events}
+	if !s.Network.None {
+		bx.meta.Net = &netMeta{Tap: s.Network.TapDevice, Addr: s.Network.Addr.String(), Gateway: s.Network.Gateway.String()}
+	}
 	b.boxes[s.ID] = bx
 	b.mu.Unlock()
 	defer func() {
@@ -239,6 +260,9 @@ func vmConfig(s backend.Spec) ([]byte, error) {
 		"vsock":          map[string]any{"guest_cid": 3, "uds_path": "/v.sock"},
 		"entropy":        map[string]any{},
 	}
+	if s.Network.TapDevice != "" { // no NIC at all with --net=none
+		cfg["network-interfaces"] = []map[string]any{{"iface_id": "eth0", "guest_mac": guestMAC, "host_dev_name": s.Network.TapDevice}}
+	}
 	return json.MarshalIndent(cfg, "", "  ")
 }
 
@@ -271,6 +295,12 @@ func (b *Backend) Start(ctx context.Context, id string) error {
 		}
 		if err := b.waitAgent(ctx, bx, exited, 30*time.Second); err != nil {
 			return err
+		}
+		if bx.meta.Net != nil {
+			req := agentproto.Request{Op: agentproto.OpConfigure, Configure: &agentproto.Configure{Hostname: bx.meta.Hostname, Net: bx.meta.Net.agent()}}
+			if err := b.call(ctx, bx, req); err != nil {
+				return fmt.Errorf("firecracker: guest network: %w", err)
+			}
 		}
 	}
 	b.subscribeEvents(bx) // guest exec/file events -> the event log

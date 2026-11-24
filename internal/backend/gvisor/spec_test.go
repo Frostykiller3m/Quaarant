@@ -3,6 +3,7 @@ package gvisor
 import (
 	"context"
 	"errors"
+	"net/netip"
 	"slices"
 	"testing"
 
@@ -173,11 +174,40 @@ func TestUnsupportedFeatures(t *testing.T) {
 		t.Errorf("Snapshot: %v", err)
 	}
 	s := testSpec()
-	s.Network = backend.Network{NetnsPath: "/run/netns/x"}
+	s.Network = backend.Network{TapDevice: "qtn1", Addr: netip.MustParsePrefix("10.231.0.6/30"), Gateway: netip.MustParseAddr("10.231.0.5")}
 	if err := b.Create(ctx, s); !errors.Is(err, errors.ErrUnsupported) {
-		t.Errorf("Create with a network attachment: %v", err)
+		t.Errorf("Create with a tap device: %v", err)
 	}
 	if _, err := New(Config{}); err == nil {
 		t.Error("New without AgentPath succeeded")
+	}
+}
+
+func TestSpecNetns(t *testing.T) {
+	for _, tt := range []struct {
+		net  backend.Network
+		path string
+	}{
+		{backend.Network{None: true}, ""}, // a fresh, empty namespace
+		{backend.Network{NetnsPath: "/run/netns/qt-x", Addr: netip.MustParsePrefix("10.231.0.6/30"), Gateway: netip.MustParseAddr("10.231.0.5")}, "/run/netns/qt-x"},
+	} {
+		s := testSpec()
+		s.Network = tt.net
+		sp, err := buildSpec(s, "/rootfs", "/agent", "/quarantine")
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, ns := range sp.Linux.Namespaces {
+			if ns.Type == specs.NetworkNamespace {
+				found = true
+				if ns.Path != tt.path {
+					t.Errorf("network namespace path %q, want %q", ns.Path, tt.path)
+				}
+			}
+		}
+		if !found {
+			t.Error("no network namespace")
+		}
 	}
 }

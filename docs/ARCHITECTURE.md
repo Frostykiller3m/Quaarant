@@ -304,6 +304,42 @@ modes:
 
 In every mode, LAN, host, link-local and cloud metadata addresses are unreachable.
 
+### Links (M3-T1)
+
+`internal/netpol` gives a sandbox with a network its own link. It also polices that link
+without ever routing sandbox traffic.
+
+- **The link.** A gVisor sandbox gets a namespace `<tag>-<id>` with a veth pair: `eth0`
+  inside, `<tag>n<index>` on the host. runsc gets `--network=sandbox` at create and at start,
+  and copies `eth0` into its netstack. A VM gets a persistent tap `<tag>n<index>`, owned by its
+  jailed VMM's uid. Each link is a `/30` from the pool (default `10.231.0.0/16`): the host side
+  is `.1` and is the guest's gateway, the guest is `.2`. A pool that overlaps a host route is
+  refused. The host side has no IPv6.
+- **No routing.** IP forwarding is not needed, and forwarded traffic to or from links is
+  dropped. One nftables table (`inet quarantine_<tag>`) matches links by name, so a sandbox
+  needs no rules of its own:
+  - IPv6 and packets with a spoofed source are dropped (a `fib` reverse-path check, and no
+    local source addresses).
+  - TCP to a forbidden destination is reset before anything else sees it. Forbidden means
+    any local address of the host, the pool (other sandboxes), private, CGNAT and link-local
+    ranges (cloud metadata), documentation, benchmarking, multicast and reserved space.
+    Other protocols to those destinations are dropped.
+  - Every other TCP connection is redirected to the sandbox's proxy on its gateway, and
+    nothing else from a link may reach the host.
+  - UDP and ICMP are dropped. DNS arrives with M3-T2's resolver.
+- **The proxy** (in qtd, one listener per sandbox on `gateway:15001`) reads the original
+  destination (`SO_ORIGINAL_DST`), checks it again against the forbidden list and the
+  host's current addresses, then asks the `Policy` (M3-T2: allow-list, SNI, logging). It
+  dials with a 10 s timeout and splices both directions. A refusal is a TCP reset. It
+  allows 512 concurrent connections per sandbox.
+- **vm.** A networked VM restores from a golden snapshot that has a NIC: `|net` in the key,
+  built against its own tap, which stays down without a host address. `network_overrides`
+  points `eth0` at the sandbox's tap. The agent's `configure` sets the address and default
+  route with ioctls. A cold boot does the same after the agent is up. `--net=none` VMs have no
+  NIC at all.
+- **What the guest sees.** `eth0` with its `/30` and a default route. Public TCP works.
+  Everything forbidden is "connection refused" at once. UDP, ICMP and IPv6 get no answer.
+
 ## Honeytokens and report
 
 - **Honeytokens (M4-T1).** qtd plants a unique fake SSH key, AWS credentials, `.env` keys and a
@@ -337,7 +373,7 @@ In every mode, LAN, host, link-local and cloud metadata addresses are unreachabl
 | `internal/safetar` | untrusted tar in/out (stdlib only: used by qt-agent too) | M2-T1 |
 | `internal/cgroups` | the cgroup v2 parent for sandboxes | M2-T1 |
 | `scripts/build-kernel.sh`, `kernel/` | reproducible guest kernel | M2-T1 |
-| `internal/netpol` | netns, nftables, resolver, SNI proxy | M3 |
+| `internal/netpol` | sandbox links (netns/veth, tap), nftables, TCP proxy; resolver and SNI checks in M3-T2 | M3 |
 | `internal/honeytoken` | plant and detect | M4-T1 |
 | `internal/report` | compaction, Claude, rules, validator | M4-T2 |
 | `internal/vet` | `qt run <git-url>` flow | M5 |

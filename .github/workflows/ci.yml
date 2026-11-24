@@ -74,7 +74,7 @@ jobs:
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
             | sudo tee /etc/apt/sources.list.d/gvisor.list
           sudo apt-get update -qq
-          sudo apt-get install -y -qq runsc
+          sudo apt-get install -y -qq runsc nftables
           runsc --version
       - name: integration tests (QT_ITEST=1, as root)
         run: sudo env "PATH=$PATH" "HOME=$HOME" GOFLAGS=-buildvcs=false QT_ITEST=1 go test -count=1 -v -run ITest ./...
@@ -101,6 +101,8 @@ jobs:
           tar -xzf "firecracker-$V-$A.tgz"
           sudo install -m 0755 "release-$V-$A/firecracker-$V-$A" /usr/local/bin/firecracker
           sudo install -m 0755 "release-$V-$A/jailer-$V-$A" /usr/local/bin/jailer
+      - name: install nftables (sandbox links)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nftables && sudo nft --version
       - name: cache the guest kernel
         id: kernel
         uses: actions/cache@v4
