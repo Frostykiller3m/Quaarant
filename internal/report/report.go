@@ -45,6 +45,7 @@ var categoryKinds = map[string][]events.Kind{
 	"network":      {events.KindNet, events.KindDNS, events.KindPolicyDenied},
 	"execution":    {events.KindExec},
 	"file":         {events.KindFile},
+	"evasion":      {events.KindFile, events.KindExec},
 }
 
 // Categories lists the finding categories (sorted).

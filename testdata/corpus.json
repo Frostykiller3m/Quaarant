@@ -1,0 +1,198 @@
+{
+  "evil": {
+    "authorized-keys": {
+      "categories": [
+        "persistence"
+      ],
+      "verdicts": [
+        "suspicious",
+        "malicious"
+      ]
+    },
+    "bashrc-persistence": {
+      "categories": [
+        "persistence"
+      ],
+      "verdicts": [
+        "suspicious",
+        "malicious"
+      ]
+    },
+    "cookie-stealer": {
+      "categories": [
+        "exfiltration",
+        "honeytoken"
+      ],
+      "verdicts": [
+        "malicious"
+      ]
+    },
+    "cron-persistence": {
+      "categories": [
+        "persistence"
+      ],
+      "verdicts": [
+        "suspicious",
+        "malicious"
+      ]
+    },
+    "dns-tunnel": {
+      "categories": [
+        "exfiltration"
+      ],
+      "verdicts": [
+        "suspicious",
+        "malicious"
+      ]
+    },
+    "dropper-hidden-tmp": {
+      "categories": [
+        "execution"
+      ],
+      "verdicts": [
+        "suspicious",
+        "malicious"
+      ]
+    },
+    "env-dns-hex": {
+      "categories": [
+        "exfiltration"
+      ],
+      "verdicts": [
+        "malicious"
+      ]
+    },
+    "env-reader-npm": {
+      "categories": [
+        "honeytoken"
+      ],
+      "verdicts": [
+        "suspicious",
+        "malicious"
+      ]
+    },
+    "exfil-aws-http": {
+      "categories": [
+        "exfiltration",
+        "honeytoken"
+      ],
+      "verdicts": [
+        "malicious"
+      ]
+    },
+    "exfil-dns-npm": {
+      "categories": [
+        "exfiltration"
+      ],
+      "verdicts": [
+        "malicious"
+      ]
+    },
+    "git-hook": {
+      "categories": [
+        "persistence"
+      ],
+      "verdicts": [
+        "suspicious",
+        "malicious"
+      ]
+    },
+    "metadata-probe": {
+      "categories": [
+        "network"
+      ],
+      "verdicts": [
+        "suspicious",
+        "malicious"
+      ]
+    },
+    "miner-pool-node": {
+      "categories": [
+        "miner"
+      ],
+      "verdicts": [
+        "suspicious",
+        "malicious"
+      ]
+    },
+    "miner-xmrig": {
+      "categories": [
+        "miner"
+      ],
+      "verdicts": [
+        "malicious"
+      ]
+    },
+    "postinstall-curl-sh": {
+      "categories": [
+        "execution"
+      ],
+      "verdicts": [
+        "suspicious",
+        "malicious"
+      ]
+    },
+    "prompt-injection-readme": {
+      "categories": [
+        "exfiltration"
+      ],
+      "verdicts": [
+        "malicious"
+      ]
+    },
+    "revshell-fifo": {
+      "categories": [
+        "execution"
+      ],
+      "verdicts": [
+        "malicious"
+      ]
+    },
+    "revshell-nc": {
+      "categories": [
+        "execution"
+      ],
+      "verdicts": [
+        "malicious"
+      ]
+    },
+    "revshell-python": {
+      "categories": [
+        "execution"
+      ],
+      "verdicts": [
+        "malicious"
+      ]
+    },
+    "sandbox-detect-idle": {
+      "categories": [
+        "evasion"
+      ],
+      "verdicts": [
+        "suspicious",
+        "malicious"
+      ]
+    },
+    "ssh-key-over-tls": {
+      "categories": [
+        "honeytoken"
+      ],
+      "verdicts": [
+        "suspicious",
+        "malicious"
+      ]
+    }
+  },
+  "normal": [
+    "docs-only",
+    "go-module",
+    "node-build",
+    "node-deps",
+    "node-plain",
+    "python-cli",
+    "python-pytest",
+    "python-requirements",
+    "shell-build",
+    "shell-sysinfo"
+  ]
+}

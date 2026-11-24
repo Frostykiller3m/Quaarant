@@ -1,0 +1,9 @@
+{
+  "name": "site-qt",
+  "version": "1.0.0",
+  "description": "qt red-team fixture",
+  "scripts": {
+    "build": "node build.js",
+    "test": "npm run build && node --test"
+  }
+}

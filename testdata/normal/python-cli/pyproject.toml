@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "greet-qt"
+version = "1.0.0"
+
+[project.scripts]
+greet = "greet:main"
+
+[tool.setuptools]
+py-modules = ["greet"]

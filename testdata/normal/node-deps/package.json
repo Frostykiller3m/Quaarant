@@ -1,0 +1,11 @@
+{
+  "name": "pad-qt",
+  "version": "1.0.0",
+  "description": "qt red-team fixture",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "left-pad": "1.3.0"
+  }
+}

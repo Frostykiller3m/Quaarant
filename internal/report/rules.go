@@ -34,6 +34,9 @@ type ruleSet struct {
 	minerWhat, tmpWhat     []string
 	uploadWhat, bypassWhat []string
 	pipeWhat, dnsWhat      []string
+	revShell, revWhat      []string
+	evasion                []string
+	evasionWhat            []string
 }
 
 // Persistence locations: shell start-up files, cron, systemd/init, autostart, SSH keys, the
@@ -45,13 +48,30 @@ var persistRe = regexp.MustCompile(`(^|/)(\.bashrc|\.bash_profile|\.bash_login|\
 
 var minerRe = regexp.MustCompile(`(?i)\b(xmrig|xmr-stak|minerd|cpuminer|ethminer|nbminer|t-rex|lolminer|phoenixminer|nanominer)\b|stratum\+(tcp|ssl)://|--donate-level|--coin[= ](xmr|monero)`)
 
-var minerDNSRe = regexp.MustCompile(`(?i)(^|\.)(pool|mining|miner|xmr|monero|nicehash|2miners|f2pool|supportxmr|nanopool|ethermine|minexmr|hashvault)[.-]`)
+var minerDNSRe = regexp.MustCompile(`(?i)(^|\.)(xmr|monero|nicehash|2miners|f2pool|supportxmr|nanopool|ethermine|minexmr|hashvault|moneroocean|c3pool|herominers|unmineable|xmrpool)[.-]`)
 
 var minerPorts = map[int]bool{3333: true, 4444: true, 5555: true, 7777: true, 14433: true, 14444: true, 45700: true}
 
 var pipeShellRe = regexp.MustCompile(`(curl|wget)\b[^|;&]*\|\s*(ba|z|da)?sh\b|(curl|wget)\b[^|;&]*-[a-zA-Z]*O-[^|;&]*\|\s*(ba|z|da)?sh\b`)
 
 var dataLabelRe = regexp.MustCompile(`^[a-z0-9]{40,}$|^[a-f0-9]{32,}$`)
+
+// Reverse shells: a shell wired to a network connection.
+var revShellRe = regexp.MustCompile(`\b(nc|ncat|netcat)\b[^|;&]*\s-(e|c)\s*\S|/dev/(tcp|udp)/[0-9a-zA-Z]` +
+	`|\bsocat\b[^|;&]*\bexec:|mkfifo\b.*\|\s*(/bin/)?(ba|da|z)?sh\s+-i\b.*\|\s*(nc|ncat|netcat|telnet)\b` +
+	`|pty\.spawn\(|\bsocket\.socket\(.*\bconnect\(.*\b(dup2|subprocess|pty)\b`)
+
+// Sandbox and VM artifacts: code that checks for them before deciding how to behave.
+var evasionPaths = map[string]bool{
+	"/.dockerenv": true, "/run/.containerenv": true, "/sys/hypervisor/type": true, "/proc/scsi/scsi": true,
+	"/proc/vz": true, "/proc/xen": true, "/sys/class/dmi/id/product_name": true, "/sys/class/dmi/id/sys_vendor": true,
+	"/sys/class/dmi/id/board_vendor": true, "/sys/class/dmi/id/bios_vendor": true, "/sys/class/dmi/id/chassis_vendor": true,
+}
+
+var evasionTools = map[string]bool{"dmesg": true, "systemd-detect-virt": true, "virt-what": true, "dmidecode": true, "imvirt": true}
+
+// toolDirs are where package managers put executables; running them is normal.
+var toolDirs = []string{"/node_modules/.bin/", "/.local/bin/", "/.cargo/bin/", "/.npm/", "/.cache/go-build/"}
 
 func (r *ruleSet) see(ev events.Event) {
 	switch ev.Kind {
@@ -69,7 +89,14 @@ func (r *ruleSet) see(ev events.Event) {
 		}
 	case events.KindFile:
 		var f events.File
-		if json.Unmarshal(ev.Data, &f) != nil || f.Errno != "" {
+		if json.Unmarshal(ev.Data, &f) != nil {
+			return
+		}
+		if f.Op == "open" && evasionPaths[f.Path] { // probing counts, found or not
+			r.evasion = append(r.evasion, ev.ID)
+			r.evasionWhat = addUnique(r.evasionWhat, f.Path)
+		}
+		if f.Errno != "" {
 			return
 		}
 		target := f.Path
@@ -93,9 +120,13 @@ func (r *ruleSet) see(ev events.Event) {
 		case minerRe.MatchString(x.Path) || minerRe.MatchString(cmd):
 			r.minerExec = append(r.minerExec, ev.ID)
 			r.minerWhat = addUnique(r.minerWhat, short(cmd, 120))
-		case x.Path != "" && (strings.HasPrefix(x.Path, "/tmp/") || strings.HasPrefix(x.Path, "/dev/shm/") || strings.HasPrefix(x.Path, "/var/tmp/")):
+		case droppedBinary(x.Path):
 			r.tmpExec = append(r.tmpExec, ev.ID)
 			r.tmpWhat = addUnique(r.tmpWhat, x.Path)
+		}
+		if revShellRe.MatchString(cmd) {
+			r.revShell = append(r.revShell, ev.ID)
+			r.revWhat = addUnique(r.revWhat, short(cmd, 120))
 		}
 		base := path.Base(x.Path)
 		if len(x.Argv) > 0 { // busybox applets: the binary is busybox, argv[0] the applet
@@ -104,6 +135,10 @@ func (r *ruleSet) see(ev events.Event) {
 		if (base == "crontab" && len(x.Argv) > 1 && x.Argv[1] != "-l") || (base == "systemctl" && strings.Contains(cmd, " enable")) {
 			r.persistence = append(r.persistence, ev.ID)
 			r.persistPaths = addUnique(r.persistPaths, short(cmd, 80))
+		}
+		if evasionTools[base] {
+			r.evasion = append(r.evasion, ev.ID)
+			r.evasionWhat = addUnique(r.evasionWhat, base)
 		}
 		if pipeShellRe.MatchString(cmd) {
 			r.pipeShell = append(r.pipeShell, ev.ID)
@@ -114,7 +149,9 @@ func (r *ruleSet) see(ev events.Event) {
 		if json.Unmarshal(ev.Data, &n) != nil {
 			return
 		}
-		if n.Op == "connect" && minerPorts[n.DstPort] && (n.Allowed == nil || *n.Allowed) {
+		// Only connections the proxy let through: a refused attempt on 4444 is as likely a
+		// reverse shell (and has its own rule), and the sentry's own connect events carry no verdict.
+		if n.Op == "connect" && minerPorts[n.DstPort] && n.Allowed != nil && *n.Allowed {
 			r.minerNet = append(r.minerNet, ev.ID)
 			r.minerWhat = addUnique(r.minerWhat, fmt.Sprintf("%s:%d", orDefault(n.SNI, n.DstIP), n.DstPort))
 		}
@@ -174,6 +211,11 @@ func (r *ruleSet) findings() []Finding {
 	if len(r.minerExec) == 0 {
 		add(r.minerNet, "Mining pool traffic", Medium, "miner", "Lookups or connections that look like a mining pool: "+list(r.minerWhat)+".")
 	}
+	add(r.revShell, "Reverse shell attempt", Critical, "execution", "A shell wired to a network connection: "+list(r.revWhat)+".")
+	if len(r.evasionWhat) >= 2 || (len(r.evasionWhat) == 1 && evasionTools[r.evasionWhat[0]]) {
+		add(r.evasion, "Looked for signs of a sandbox", Medium, "evasion",
+			"Checks for container or VM artifacts ("+list(r.evasionWhat)+"): malware does this to behave innocently when it is watched.")
+	}
 	add(r.persistence, "Wrote to persistence locations", High, "persistence",
 		"Changes that make code run again later (shell start-up, cron, services, SSH keys, hooks): "+list(r.persistPaths)+".")
 	add(r.metadata, "Probed the cloud metadata service", High, "network",
@@ -186,7 +228,7 @@ func (r *ruleSet) findings() []Finding {
 	}
 	add(r.dnsData, "Data-like DNS names", Medium, "exfiltration", "DNS names with long encoded-looking labels, a common way to smuggle data out: "+list(r.dnsWhat)+".")
 	add(r.pipeShell, "Downloaded and ran a script", Medium, "execution", "A download piped straight into a shell: "+list(r.pipeWhat)+".")
-	add(r.tmpExec, "Ran a program from a temporary directory", Medium, "execution", "Executables run from /tmp, /var/tmp or /dev/shm: "+list(r.tmpWhat)+".")
+	add(r.tmpExec, "Ran a program from a hidden or temporary location", Medium, "execution", "Executables run from a hidden path under /tmp, or from /var/tmp or /dev/shm: "+list(r.tmpWhat)+".")
 	add(r.bigUpload, "Large upload", Low, "exfiltration", "Over 10 MiB sent to "+list(r.uploadWhat)+".")
 	sortFindings(out)
 	return out
@@ -220,3 +262,20 @@ func list(xs []string) string {
 }
 
 func short(s string, n int) string { return clean(s, n) }
+
+// droppedBinary: an executable where droppers put them (hidden paths under /tmp, /var/tmp,
+// /dev/shm), not a build's own outputs (/tmp/go-build..., node_modules/.bin, ...).
+func droppedBinary(p string) bool {
+	for _, d := range toolDirs {
+		if strings.Contains(p, d) {
+			return false
+		}
+	}
+	switch {
+	case strings.HasPrefix(p, "/dev/shm/"), strings.HasPrefix(p, "/var/tmp/"):
+		return true
+	case strings.HasPrefix(p, "/tmp/"):
+		return strings.Contains(p[len("/tmp"):], "/.")
+	}
+	return false
+}

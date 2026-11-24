@@ -42,7 +42,13 @@ func qtd(t *testing.T) qtdv1.SandboxServiceClient {
 	}
 	dir := t.TempDir()
 	data, state := filepath.Join(dir, "data"), filepath.Join(dir, "runsc")
-	t.Cleanup(func() { _ = exec.Command("umount", "-l", filepath.Join(state, "null-netns")).Run() })
+	t.Cleanup(func() { // runsc may pin it more than once when sandboxes start in parallel
+		for range 64 {
+			if exec.Command("umount", "-l", filepath.Join(state, "null-netns")).Run() != nil {
+				break
+			}
+		}
+	})
 	agent := filepath.Join(dir, "qt-agent")
 	build := exec.Command("go", "build", "-buildvcs=false", "-o", agent, "github.com/Frostykiller3m/Quaarant/cmd/qt-agent")
 	build.Env = append(os.Environ(), "CGO_ENABLED=0")
