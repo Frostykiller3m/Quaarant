@@ -21,6 +21,9 @@ export CGO_ENABLED ?= 0
 BUF_VERSION                := v1.75.0
 PROTOC_GEN_GO_VERSION      := v1.36.12
 PROTOC_GEN_GO_GRPC_VERSION := v1.6.2
+# protoc-gen-go formats its output with the go/format of the Go that built it, and that
+# changes between Go releases: pin it so generated code is identical everywhere.
+PROTO_GO_TOOLCHAIN         := go1.27.4
 
 PREFIX ?= /usr/local
 
@@ -68,9 +71,9 @@ tidy: ## Tidy go.mod and fail if it changed
 	git diff --exit-code go.mod go.sum
 
 tools: ## Install pinned buf and protoc plugins into GOBIN
-	$(GO) install github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
-	$(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
-	$(GO) install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
+	GOTOOLCHAIN=$(PROTO_GO_TOOLCHAIN) $(GO) install github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
+	GOTOOLCHAIN=$(PROTO_GO_TOOLCHAIN) $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
+	GOTOOLCHAIN=$(PROTO_GO_TOOLCHAIN) $(GO) install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
 
 proto: ## Regenerate Go code from proto/ and the vendored gVisor protos
 	buf generate
