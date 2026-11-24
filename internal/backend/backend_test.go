@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/qt-dev/quarantine/internal/backend"
-	"github.com/qt-dev/quarantine/internal/backend/fake"
-	"github.com/qt-dev/quarantine/internal/events"
+	"github.com/Frostykiller3m/Quaarant/internal/backend"
+	"github.com/Frostykiller3m/Quaarant/internal/backend/fake"
+	"github.com/Frostykiller3m/Quaarant/internal/events"
 )
 
 type recordingSink struct {

@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/qt-dev/quarantine/internal/backend"
-	"github.com/qt-dev/quarantine/internal/events"
+	"github.com/Frostykiller3m/Quaarant/internal/backend"
+	"github.com/Frostykiller3m/Quaarant/internal/events"
 )
 
 // Backend is a fake backend. The zero value is not usable; call New.

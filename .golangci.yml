@@ -56,4 +56,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/qt-dev/quarantine
+        - github.com/Frostykiller3m/Quaarant

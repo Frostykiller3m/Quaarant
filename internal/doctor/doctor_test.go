@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qt-dev/quarantine/internal/backend"
+	"github.com/Frostykiller3m/Quaarant/internal/backend"
 )
 
 // fakeEnv is a configurable Env. The zero value is a Linux host with nothing installed.

@@ -2,7 +2,7 @@
 //
 // Version, Commit and Date are set at link time:
 //
-//	go build -ldflags "-X github.com/qt-dev/quarantine/internal/version.Version=v0.1.0 ..."
+//	go build -ldflags "-X github.com/Frostykiller3m/Quaarant/internal/version.Version=v0.1.0 ..."
 //
 // When they are not set, Get falls back to the VCS info embedded by the Go toolchain.
 package version

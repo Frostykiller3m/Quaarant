@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/qt-dev/quarantine/internal/events"
+	"github.com/Frostykiller3m/Quaarant/internal/events"
 )
 
 // Isolation names a backend, as used by --isolation.

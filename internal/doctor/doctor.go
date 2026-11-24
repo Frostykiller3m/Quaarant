@@ -13,7 +13,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/qt-dev/quarantine/internal/backend"
+	"github.com/Frostykiller3m/Quaarant/internal/backend"
 )
 
 // Status of one check.

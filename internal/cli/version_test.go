@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qt-dev/quarantine/internal/version"
+	"github.com/Frostykiller3m/Quaarant/internal/version"
 )
 
 func run(t *testing.T, args ...string) (string, error) {

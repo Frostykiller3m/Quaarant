@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qt-dev/quarantine/internal/doctor"
+	"github.com/Frostykiller3m/Quaarant/internal/doctor"
 )
 
 // stubEnv is a Linux host where only gVisor is usable.
