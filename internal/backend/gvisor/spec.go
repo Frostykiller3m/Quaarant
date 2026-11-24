@@ -2,6 +2,7 @@ package gvisor
 
 import (
 	"fmt"
+	"net/netip"
 	"runtime"
 	"strconv"
 	"strings"
@@ -100,7 +101,7 @@ func buildSpec(s backend.Spec, rootfs, agent, cgroupParent string) (*specs.Spec,
 	mem := l.MemoryBytes
 	pids := hostPidsLimit(l.PIDs)
 
-	return &specs.Spec{
+	sp := &specs.Spec{
 		Version:  specs.Version,
 		Hostname: s.Hostname,
 		Root:     &specs.Root{Path: rootfs, Readonly: false}, // lower image is read-only; writes land in upper/
@@ -143,7 +144,21 @@ func buildSpec(s backend.Spec, rootfs, agent, cgroupParent string) (*specs.Spec,
 			ReadonlyPaths: []string{"/proc/bus", "/proc/fs", "/proc/irq", "/proc/sys", "/proc/sysrq-trigger"},
 		},
 		Annotations: map[string]string{"dev.quarantine.sandbox": s.ID},
-	}, nil
+	}
+	if !s.Network.None { // qtd's resolver (DNS to any server reaches it anyway); not in upper/
+		sp.Mounts = append(sp.Mounts, specs.Mount{
+			Destination: "/etc/resolv.conf", Type: "bind",
+			Source: resolvConfPath(s.Workspace), Options: []string{"rbind", "ro", "nosuid", "nodev", "noexec"},
+		})
+	}
+	return sp, nil
+}
+
+func resolvConfPath(ws string) string { return ws + "/resolv.conf" }
+
+// ResolvConf is the resolv.conf of a sandbox on a link: its gateway is qtd's resolver.
+func ResolvConf(gw netip.Addr) []byte {
+	return []byte("# qt: DNS is answered by qtd on the host (internal/netpol)\nnameserver " + gw.String() + "\noptions ndots:1 timeout:2 attempts:2\n")
 }
 
 // The process limit is enforced inside the sandbox with RLIMIT_NPROC (gVisor implements it:

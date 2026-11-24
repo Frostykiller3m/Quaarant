@@ -2,6 +2,7 @@ package backendtest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Frostykiller3m/Quaarant/internal/backend"
+	"github.com/Frostykiller3m/Quaarant/internal/events"
 	"github.com/Frostykiller3m/Quaarant/internal/netpol"
 )
 
@@ -55,6 +57,7 @@ func (d *decisions) find(dst string) (netpol.Decision, bool) {
 func RunNet(t *testing.T, env NetEnv) {
 	n := rand.IntN(200) //nolint:gosec // G404: picks a test pool, not a secret
 	d := &decisions{}
+	rec := &netEvents{}
 	pool := netip.MustParsePrefix(fmt.Sprintf("10.233.%d.0/24", n))
 	m, err := netpol.New(context.Background(), netpol.Config{
 		Tag: fmt.Sprintf("b%02x", n), Pool: pool, ProxyPort: netpol.DefaultProxyPort, OnDecision: d.add,
@@ -70,7 +73,7 @@ func RunNet(t *testing.T, env NetEnv) {
 	b := env.Backend()
 	lim := backend.Limits{CPUMillis: 1000, MemoryBytes: 256 << 20, PIDs: 64}
 	start := func(id string) (*netpol.Link, backend.Spec) {
-		l, err := m.Attach(context.Background(), id, env.Kind(), env.Owner(id))
+		l, err := m.Attach(context.Background(), id, env.Kind(), env.Owner(id), netpol.Rules{Mode: netpol.ModeLog}, rec.add)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -161,8 +164,23 @@ func RunNet(t *testing.T, env NetEnv) {
 		t.Errorf("the host listener was reached %d times", n)
 	}
 
+	t.Run("DNS to any server is answered by qtd", func(t *testing.T) {
+		r := Exec(t, b, a.ID, Sh("timeout 10 nslookup example.com 8.8.8.8"))
+		if r.Status.Code != 0 || !rec.has(`"qname":"example.com"`, `"allowed":true`) {
+			t.Errorf("nslookup via 8.8.8.8: %q %q; recorded: %v", r.Stdout, r.Stderr, rec.has(`"qname":"example.com"`))
+		}
+	})
+	t.Run("other UDP is refused and recorded", func(t *testing.T) {
+		_ = Exec(t, b, a.ID, Sh("echo x | nc -u -w 1 8.8.8.8 123; true"))
+		deadline := time.Now().Add(2 * time.Second)
+		for !rec.has(`"target":"8.8.8.8:123"`, `"reason":"not_allowlisted"`) {
+			if time.Now().After(deadline) {
+				t.Fatal("no policy_denied event for UDP to 8.8.8.8:123")
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	})
 	for _, p := range []struct{ name, script string }{
-		{"UDP (DNS to a public resolver)", "timeout 5 nslookup example.com 8.8.8.8"},
 		{"ICMP", "ping -c 1 -W 2 1.1.1.1"},
 		{"IPv6", "ping -6 -c 1 -W 2 2606:4700:4700::1111"},
 	} {
@@ -172,4 +190,32 @@ func RunNet(t *testing.T, env NetEnv) {
 			}
 		})
 	}
+}
+
+// netEvents records a link's events as JSON lines.
+type netEvents struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (r *netEvents) add(p events.Payload) {
+	b, _ := json.Marshal(p)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = append(r.lines, string(p.Kind())+" "+string(b))
+}
+
+func (r *netEvents) has(subs ...string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, l := range r.lines {
+		ok := true
+		for _, s := range subs {
+			ok = ok && strings.Contains(l, s)
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
 }

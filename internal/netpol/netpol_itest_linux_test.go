@@ -125,11 +125,11 @@ func hostAddrs(pool netip.Prefix) []netip.Addr {
 func TestITestLinkIsolation(t *testing.T) {
 	m, d := itestManager(t)
 	ctx := context.Background()
-	a, err := m.Attach(ctx, "probe-a", Netns, 0)
+	a, err := m.Attach(ctx, "probe-a", Netns, 0, Rules{Mode: ModeLog}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := m.Attach(ctx, "probe-b", Netns, 0)
+	b, err := m.Attach(ctx, "probe-b", Netns, 0, Rules{Mode: ModeLog}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,9 +187,9 @@ func TestITestLinkIsolation(t *testing.T) {
 
 	// Not TCP: UDP (DNS to a public resolver) and ICMP don't leave; nor does IPv6.
 	for name, cmd := range map[string]string{
-		"udp dns":   `exec 3<>/dev/udp/8.8.8.8/53; printf '\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01' >&3; timeout 3 head -c 1 <&3`,
-		"icmp ping": "ping -c 1 -W 2 1.1.1.1",
-		"ipv6":      "ping -6 -c 1 -W 2 2606:4700:4700::1111 || ip -6 addr show dev eth0 scope global | grep -q inet6 && exit 0; exit 1",
+		"udp (not DNS)": `exec 3<>/dev/udp/1.1.1.1/443; printf 'quic?' >&3; timeout 3 head -c 1 <&3`,
+		"icmp ping":     "ping -c 1 -W 2 1.1.1.1",
+		"ipv6":          "ping -6 -c 1 -W 2 2606:4700:4700::1111 || ip -6 addr show dev eth0 scope global | grep -q inet6 && exit 0; exit 1",
 	} {
 		out, err := exec.Command("ip", "netns", "exec", a.Netns, "timeout", "8", "bash", "-c", cmd).CombinedOutput()
 		if err == nil {

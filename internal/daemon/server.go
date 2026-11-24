@@ -24,6 +24,7 @@ import (
 	qtdv1 "github.com/Frostykiller3m/Quaarant/internal/api/qtd/v1"
 	"github.com/Frostykiller3m/Quaarant/internal/backend"
 	"github.com/Frostykiller3m/Quaarant/internal/image"
+	"github.com/Frostykiller3m/Quaarant/internal/netpol"
 )
 
 // ImagePuller resolves and unpacks images (image.Store in production).
@@ -43,7 +44,9 @@ type Options struct {
 	Images   ImagePuller
 	// DefaultUser runs sandboxes whose image has no non-root user ("uid:gid", never 0).
 	DefaultUser string
-	Logger      *slog.Logger
+	// Net gives sandboxes network links (--net=log, --net=allow:...); nil: --net=none only.
+	Net    *netpol.Manager
+	Logger *slog.Logger
 }
 
 // DefaultSandboxUser is nobody:nogroup, present in nearly every image's /etc/passwd.
@@ -86,6 +89,7 @@ func New(opts Options) (*Service, error) {
 	for _, b := range opts.Backends {
 		s.backends[b.Name()] = b
 	}
+	s.adoptLinks(context.Background())
 	return s, nil
 }
 
@@ -154,10 +158,12 @@ func (s *Service) Create(ctx context.Context, req *qtdv1.CreateRequest) (*qtdv1.
 	if !ok {
 		return nil, status.Errorf(codes.FailedPrecondition, "isolation %q is not available on this host (see `qt doctor`)", iso)
 	}
-	switch req.GetNet().GetMode() {
-	case qtdv1.NetPolicy_MODE_UNSPECIFIED, qtdv1.NetPolicy_MODE_NONE:
-	default:
-		return nil, status.Error(codes.Unimplemented, "network policies other than none arrive in M3 (use --net=none)")
+	rules, networked, err := rulesFromProto(req.GetNet())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "network: %v", err)
+	}
+	if networked && s.opts.Net == nil {
+		return nil, status.Error(codes.FailedPrecondition, "this qtd has no sandbox networking (needs Linux with iproute2 and nftables; see `qt doctor` and the qtd log)")
 	}
 	if req.GetHoneytokens() {
 		return nil, status.Error(codes.Unimplemented, "honeytokens arrive in M4")
@@ -222,10 +228,24 @@ func (s *Service) Create(ctx context.Context, req *qtdv1.CreateRequest) (*qtdv1.
 			return nil, status.Errorf(codes.Internal, "vm disk image: %v", err)
 		}
 	}
+	network := backend.Network{None: true}
+	if networked {
+		l, nr, err := s.attach(ctx, id, iso, be, rules)
+		if err != nil {
+			s.cleanup(id, be)
+			return nil, err
+		}
+		rec.Net = nr
+		if err := s.reg.save(rec); err != nil {
+			s.cleanup(id, be)
+			return nil, status.Errorf(codes.Internal, "%v", err)
+		}
+		network = l.Network()
+	}
 	spec := backend.Spec{
 		ID: id, Image: img.Ref, RootFS: rootfs, Workspace: ws, Hostname: hostname,
 		User: user, Env: env, Workdir: workdir, Limits: limits,
-		Network: backend.Network{None: true},
+		Network: network,
 		Events:  s.eventLogFor(id),
 		Labels:  req.GetLabels(),
 	}
@@ -259,6 +279,9 @@ func (s *Service) cleanup(id string, be backend.Backend) {
 	if err := be.Destroy(ctx, id); err != nil {
 		s.log.Error("cleanup after failed create", "id", id, "err", err)
 		return // keep the workspace so `qt rm` can retry
+	}
+	if err := s.detach(ctx, id); err != nil {
+		s.log.Error("cleanup after failed create: network", "id", id, "err", err)
 	}
 	if l, ok := s.logs.LoadAndDelete(id); ok {
 		l.(*eventLog).close()
@@ -305,7 +328,7 @@ func (s *Service) toProto(ctx context.Context, rec *record) *qtdv1.Sandbox {
 			CpuMillis: uint32(rec.Limits.CPUMillis), MemoryBytes: uint64(rec.Limits.MemoryBytes), //nolint:gosec // G115: validated positive
 			Pids: uint32(rec.Limits.PIDs), //nolint:gosec // G115: validated positive
 		},
-		Net:          &qtdv1.NetPolicy{Mode: qtdv1.NetPolicy_MODE_NONE},
+		Net:          netToProto(rec.Net),
 		Capabilities: caps,
 		Labels:       rec.Labels,
 	}
@@ -371,6 +394,9 @@ func (s *Service) Destroy(ctx context.Context, req *qtdv1.DestroyRequest) (*qtdv
 		}
 	}
 	if err := errors.Join(errs...); err != nil {
+		return nil, status.Errorf(codes.Internal, "destroy %s: %v", id, err)
+	}
+	if err := s.detach(ctx, id); err != nil { // after the sandbox is gone; before its log closes
 		return nil, status.Errorf(codes.Internal, "destroy %s: %v", id, err)
 	}
 	if l, ok := s.logs.LoadAndDelete(id); ok {
