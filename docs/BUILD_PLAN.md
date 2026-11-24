@@ -52,18 +52,26 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
   ```
 
   Follow-ups noted during M1-T1 (not done there):
-  - M1-T2: `qt diff` reads `upper/` while the sandbox runs; runsc uses `--file-access=exclusive`
-    (sentry page cache), so check whether diff needs a sync or `--file-access=shared`. Hide
-    qt's own `/.qt/` mountpoint from diffs. `Limits.DiskBytes` is rejected until a disk quota exists.
+  - M1-T2 (resolved there): `--file-access=exclusive` caches failed lookups, so files copied in
+    from the host stayed invisible; the root mount now uses `--file-access=shared`. `/.qt/` is
+    hidden from diffs. `Limits.DiskBytes` is still rejected until a disk quota exists.
   - M1-T3: qtd's `eventLog` writer is minimal (no follow, no runtime monitoring yet).
   - Sandboxes do not survive a host (or WSL distro) restart: runsc state lives in /run. qtd then
     shows them as `stopped` and `qt rm` cleans them up (checked by hand). WSL shuts an idle distro
     down when no terminal is attached; keep one open, or see WSL's idle-timeout settings.
   - Live terminal resize (SIGWINCH → TIOCSWINSZ) is wired but only the initial size is tested.
 
-- [ ] **M1-T2 · Copy-on-write workspace + diff**
+- [x] **M1-T2 · Copy-on-write workspace + diff**
       Done when: `qt cp` in/out works; `qt diff <id>` lists added/changed/deleted files with
       sizes and hashes; `qt rm` leaves nothing in the data dir (a test checks).
+
+  Follow-ups noted during M1-T2 (not done there):
+  - Diff and copy for a sandbox that is `stopped` after a host restart: the backend finds
+    sandboxes through `runsc state`, so both fail with "no such sandbox" until it is recreated.
+  - `qt diff` compares with the image: files copied in with `qt cp` show as added. M5 may want a
+    "since copy-in" baseline (snapshot the upper dir after setup).
+  - Diff hashes every changed regular file in full; a sandbox writing huge files makes diff slow.
+    Bounded by MaxChanges (100k entries) but not by bytes.
 
 - [ ] **M1-T3 · Events from gVisor**
       Done when: exec, file open/write/unlink and connect events stream to `events.jsonl` via

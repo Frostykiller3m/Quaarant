@@ -305,14 +305,20 @@ const (
 	Deleted  ChangeKind = "deleted"
 )
 
-// Change is one filesystem difference from the base image.
+// Change is one filesystem difference from the base image. Path and LinkTarget come from the
+// sandbox: untrusted, and they may contain any byte except NUL and '/' (in names).
 type Change struct {
-	Path   string
-	Kind   ChangeKind
-	Mode   fs.FileMode
-	Size   int64
-	SHA256 string // hex; empty for deleted entries and directories
+	Path       string
+	Kind       ChangeKind
+	Mode       fs.FileMode
+	Size       int64
+	SHA256     string // hex; empty for deleted entries, directories and non-regular files
+	LinkTarget string // symlinks only
 }
+
+// ErrDiffTruncated is wrapped by Diff when there are more changes than it reports; the
+// changes returned with it are still valid.
+var ErrDiffTruncated = errors.New("diff truncated")
 
 // SnapshotOptions controls Snapshot.
 type SnapshotOptions struct {

@@ -3,6 +3,8 @@
 package daemon
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -388,5 +390,99 @@ func TestPeerFromSocket(t *testing.T) {
 	}
 	if got.UID != uint32(os.Getuid()) || got.PID != int32(os.Getpid()) {
 		t.Errorf("peer = %+v, want uid %d pid %d", got, os.Getuid(), os.Getpid())
+	}
+}
+
+func TestCopyAndDiffRPCs(t *testing.T) {
+	h := newHarness(t, 0, nil)
+	sb := h.create(t, &qtdv1.CreateRequest{})
+	ctx := context.Background()
+
+	// A 3-entry tar, sent in small chunks.
+	var tarBuf bytes.Buffer
+	tw := tar.NewWriter(&tarBuf)
+	for _, n := range []string{"d/", "d/a", "d/b"} {
+		hdr := &tar.Header{Name: n, Mode: 0o644, Typeflag: tar.TypeReg}
+		if strings.HasSuffix(n, "/") {
+			hdr.Typeflag = tar.TypeDir
+		}
+		_ = tw.WriteHeader(hdr)
+	}
+	_ = tw.Close()
+	in, err := h.client.CopyIn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = in.Send(&qtdv1.CopyInRequest{Msg: &qtdv1.CopyInRequest_Header_{Header: &qtdv1.CopyInRequest_Header{SandboxId: sb.GetId(), Dir: "/work"}}})
+	data := tarBuf.Bytes()
+	for i := 0; i < len(data); i += 700 {
+		_ = in.Send(&qtdv1.CopyInRequest{Msg: &qtdv1.CopyInRequest_TarChunk{TarChunk: data[i:min(i+700, len(data))]}})
+	}
+	resp, err := in.CloseAndRecv()
+	if err != nil || resp.GetBytes() != uint64(len(data)) || resp.GetFiles() != 3 {
+		t.Fatalf("copy in = %v, %v; want %d bytes, 3 entries", resp, err, len(data))
+	}
+
+	out, err := h.client.CopyOut(ctx, &qtdv1.CopyOutRequest{SandboxId: sb.GetId(), Path: "/work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []byte
+	for {
+		msg, err := out.Recv()
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				t.Fatal(err)
+			}
+			break
+		}
+		got = append(got, msg.GetTarChunk()...)
+	}
+	if !bytes.Equal(got, data) {
+		t.Errorf("copy out returned %d bytes, want the %d copied in", len(got), len(data))
+	}
+
+	diff, err := h.client.Diff(ctx, &qtdv1.DiffRequest{SandboxId: sb.GetId()})
+	if err != nil || len(diff.GetChanges()) != 1 || diff.GetChanges()[0].GetPath() != "/work" || diff.GetChanges()[0].GetKind() != qtdv1.Change_KIND_ADDED {
+		t.Errorf("diff = %v, %v", diff, err)
+	}
+
+	errs := []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{"diff against another sandbox", func() error {
+			_, err := h.client.Diff(ctx, &qtdv1.DiffRequest{SandboxId: sb.GetId(), AgainstSandboxId: sb.GetId()})
+			return err
+		}(), codes.Unimplemented},
+		{"diff unknown", func() error { _, err := h.client.Diff(ctx, &qtdv1.DiffRequest{SandboxId: "abcdef012345"}); return err }(), codes.NotFound},
+		{"copy out relative path", func() error {
+			s, _ := h.client.CopyOut(ctx, &qtdv1.CopyOutRequest{SandboxId: sb.GetId(), Path: "etc/passwd"})
+			_, err := s.Recv()
+			return err
+		}(), codes.InvalidArgument},
+		{"copy out dotdot", func() error {
+			s, _ := h.client.CopyOut(ctx, &qtdv1.CopyOutRequest{SandboxId: sb.GetId(), Path: "/work/../../etc"})
+			_, err := s.Recv()
+			return err
+		}(), codes.InvalidArgument},
+		{"copy in without header", func() error {
+			s, _ := h.client.CopyIn(ctx)
+			_ = s.Send(&qtdv1.CopyInRequest{Msg: &qtdv1.CopyInRequest_TarChunk{TarChunk: []byte("x")}})
+			_, err := s.CloseAndRecv()
+			return err
+		}(), codes.InvalidArgument},
+		{"copy in bad dir", func() error {
+			s, _ := h.client.CopyIn(ctx)
+			_ = s.Send(&qtdv1.CopyInRequest{Msg: &qtdv1.CopyInRequest_Header_{Header: &qtdv1.CopyInRequest_Header{SandboxId: sb.GetId(), Dir: "work"}}})
+			_, err := s.CloseAndRecv()
+			return err
+		}(), codes.InvalidArgument},
+	}
+	for _, e := range errs {
+		if status.Code(e.err) != e.code {
+			t.Errorf("%s: %v, want %v", e.name, e.err, e.code)
+		}
 	}
 }

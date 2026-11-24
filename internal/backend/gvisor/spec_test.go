@@ -166,9 +166,6 @@ func TestUnsupportedFeatures(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if _, err := b.Diff(ctx, "x"); !errors.Is(err, errors.ErrUnsupported) {
-		t.Errorf("Diff: %v", err)
-	}
 	if err := b.Fork(ctx, "x", nil); !errors.Is(err, errors.ErrUnsupported) {
 		t.Errorf("Fork: %v", err)
 	}

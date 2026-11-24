@@ -1255,12 +1255,18 @@ func (x *DiffRequest) GetAgainstSandboxId() string {
 }
 
 type Change struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	Kind          Change_Kind            `protobuf:"varint,2,opt,name=kind,proto3,enum=qtd.v1.Change_Kind" json:"kind,omitempty"`
-	Mode          uint32                 `protobuf:"varint,3,opt,name=mode,proto3" json:"mode,omitempty"`
-	Size          uint64                 `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`
-	Sha256        string                 `protobuf:"bytes,5,opt,name=sha256,proto3" json:"sha256,omitempty"` // hex; empty for deleted entries and directories
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Paths and link targets are chosen by sandboxed code: untrusted. If one is not valid UTF-8,
+	// the string field holds a lossy form (invalid bytes become U+FFFD) and the *_raw field the
+	// exact bytes; otherwise *_raw is empty.
+	Path          string      `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	Kind          Change_Kind `protobuf:"varint,2,opt,name=kind,proto3,enum=qtd.v1.Change_Kind" json:"kind,omitempty"`
+	Mode          uint32      `protobuf:"varint,3,opt,name=mode,proto3" json:"mode,omitempty"` // POSIX st_mode: file type bits (S_IFMT) and permissions
+	Size          uint64      `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`
+	Sha256        string      `protobuf:"bytes,5,opt,name=sha256,proto3" json:"sha256,omitempty"`                           // hex; empty for deleted entries, directories and non-regular files
+	LinkTarget    string      `protobuf:"bytes,6,opt,name=link_target,json=linkTarget,proto3" json:"link_target,omitempty"` // symlinks only
+	PathRaw       []byte      `protobuf:"bytes,7,opt,name=path_raw,json=pathRaw,proto3" json:"path_raw,omitempty"`
+	LinkTargetRaw []byte      `protobuf:"bytes,8,opt,name=link_target_raw,json=linkTargetRaw,proto3" json:"link_target_raw,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1330,9 +1336,31 @@ func (x *Change) GetSha256() string {
 	return ""
 }
 
+func (x *Change) GetLinkTarget() string {
+	if x != nil {
+		return x.LinkTarget
+	}
+	return ""
+}
+
+func (x *Change) GetPathRaw() []byte {
+	if x != nil {
+		return x.PathRaw
+	}
+	return nil
+}
+
+func (x *Change) GetLinkTargetRaw() []byte {
+	if x != nil {
+		return x.LinkTargetRaw
+	}
+	return nil
+}
+
 type DiffResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Changes       []*Change              `protobuf:"bytes,1,rep,name=changes,proto3" json:"changes,omitempty"`
+	Truncated     bool                   `protobuf:"varint,2,opt,name=truncated,proto3" json:"truncated,omitempty"` // more changes exist than were returned
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1372,6 +1400,13 @@ func (x *DiffResponse) GetChanges() []*Change {
 		return x.Changes
 	}
 	return nil
+}
+
+func (x *DiffResponse) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
 }
 
 type EventsRequest struct {
@@ -2174,21 +2209,26 @@ const file_qtd_v1_qtd_proto_rawDesc = "" +
 	"\vDiffRequest\x12\x1d\n" +
 	"\n" +
 	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12,\n" +
-	"\x12against_sandbox_id\x18\x02 \x01(\tR\x10againstSandboxId\"\xd8\x01\n" +
+	"\x12against_sandbox_id\x18\x02 \x01(\tR\x10againstSandboxId\"\xbc\x02\n" +
 	"\x06Change\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12'\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x13.qtd.v1.Change.KindR\x04kind\x12\x12\n" +
 	"\x04mode\x18\x03 \x01(\rR\x04mode\x12\x12\n" +
 	"\x04size\x18\x04 \x01(\x04R\x04size\x12\x16\n" +
-	"\x06sha256\x18\x05 \x01(\tR\x06sha256\"Q\n" +
+	"\x06sha256\x18\x05 \x01(\tR\x06sha256\x12\x1f\n" +
+	"\vlink_target\x18\x06 \x01(\tR\n" +
+	"linkTarget\x12\x19\n" +
+	"\bpath_raw\x18\a \x01(\fR\apathRaw\x12&\n" +
+	"\x0flink_target_raw\x18\b \x01(\fR\rlinkTargetRaw\"Q\n" +
 	"\x04Kind\x12\x14\n" +
 	"\x10KIND_UNSPECIFIED\x10\x00\x12\x0e\n" +
 	"\n" +
 	"KIND_ADDED\x10\x01\x12\x11\n" +
 	"\rKIND_MODIFIED\x10\x02\x12\x10\n" +
-	"\fKIND_DELETED\x10\x03\"8\n" +
+	"\fKIND_DELETED\x10\x03\"V\n" +
 	"\fDiffResponse\x12(\n" +
-	"\achanges\x18\x01 \x03(\v2\x0e.qtd.v1.ChangeR\achanges\"\x82\x01\n" +
+	"\achanges\x18\x01 \x03(\v2\x0e.qtd.v1.ChangeR\achanges\x12\x1c\n" +
+	"\ttruncated\x18\x02 \x01(\bR\ttruncated\"\x82\x01\n" +
 	"\rEventsRequest\x12\x1d\n" +
 	"\n" +
 	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12\x16\n" +

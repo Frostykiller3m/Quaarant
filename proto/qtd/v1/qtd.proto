@@ -186,15 +186,22 @@ message Change {
     KIND_MODIFIED = 2;
     KIND_DELETED = 3;
   }
+  // Paths and link targets are chosen by sandboxed code: untrusted. If one is not valid UTF-8,
+  // the string field holds a lossy form (invalid bytes become U+FFFD) and the *_raw field the
+  // exact bytes; otherwise *_raw is empty.
   string path = 1;
   Kind kind = 2;
-  uint32 mode = 3;
+  uint32 mode = 3; // POSIX st_mode: file type bits (S_IFMT) and permissions
   uint64 size = 4;
-  string sha256 = 5; // hex; empty for deleted entries and directories
+  string sha256 = 5; // hex; empty for deleted entries, directories and non-regular files
+  string link_target = 6; // symlinks only
+  bytes path_raw = 7;
+  bytes link_target_raw = 8;
 }
 
 message DiffResponse {
   repeated Change changes = 1;
+  bool truncated = 2; // more changes exist than were returned
 }
 
 message EventsRequest {

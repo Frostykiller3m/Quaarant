@@ -152,3 +152,46 @@ func TestCLIErrors(t *testing.T) {
 		t.Errorf("ls with no daemon = %+v", r)
 	}
 }
+
+func TestCLICopyAndDiff(t *testing.T) {
+	socket, _, _ := qtd(t)
+	r := runQt(t, socket, "", "run", "-q", "alpine", "true")
+	if r.code != 0 {
+		t.Fatalf("run: %+v", r)
+	}
+	id := strings.TrimSpace(runQt(t, socket, "", "ls", "-q").stdout)
+
+	src := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(src, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "sub", "f.txt"), []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if r := runQt(t, socket, "", "cp", src, id+":/work"); r.code != 0 || !strings.Contains(r.stderr, "copied 3 entries") {
+		t.Fatalf("cp in = %+v", r)
+	}
+	// The fake backend reports each copy-in target as added.
+	if r := runQt(t, socket, "", "diff", id); r.code != 0 || !regexp.MustCompile(`(?m)^A\s+\S+\s+\S+.*/work$`).MatchString(r.stdout) || !strings.Contains(r.stderr, "1 added, 0 modified, 0 deleted") {
+		t.Errorf("diff = %+v", r)
+	}
+	if r := runQt(t, socket, "", "diff", "--json", id); !strings.Contains(r.stdout, `"KIND_ADDED"`) {
+		t.Errorf("diff --json = %+v", r)
+	}
+	// Out again: the fake returns the same tar, which unpacks as repo/sub/f.txt.
+	out := t.TempDir()
+	if r := runQt(t, socket, "", "cp", id+":/work", out); r.code != 0 {
+		t.Fatalf("cp out = %+v", r)
+	}
+	if b, err := os.ReadFile(filepath.Join(out, "repo", "sub", "f.txt")); err != nil || string(b) != "payload" {
+		t.Errorf("copied out file = %q, %v", b, err)
+	}
+	if r := runQt(t, socket, "", "cp", id+":/work", "-"); r.code != 0 || !strings.Contains(r.stdout, "payload") {
+		t.Errorf("cp to stdout = code %d, %d bytes", r.code, len(r.stdout))
+	}
+	for _, args := range [][]string{{"cp", "a", "b"}, {"cp", id + ":/a", id + ":/b"}, {"cp", src, id + ":relative"}} {
+		if r := runQt(t, socket, "", args...); r.code != 1 {
+			t.Errorf("%v = %+v, want an error", args, r)
+		}
+	}
+}

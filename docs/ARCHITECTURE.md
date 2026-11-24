@@ -51,7 +51,12 @@ The two backends share integration tests, so the same command behaves the same o
   `sandboxes/<id>/upper` receives every write, so the host sees changes without asking the guest.
   runsc runs with `--overlay2=none` (no in-memory overlay). gVisor puts a tmpfs on an empty `/tmp`
   by default, so the spec bind-mounts the overlay's own `/tmp` to keep `/tmp` writes visible too.
-  `upper/` gets the image root's mode, or the non-root user could not traverse `/`.
+  `upper/` gets the image root's mode, or the non-root user could not traverse `/`. The overlay
+  is mounted with `metacopy=off,redirect_dir=off`, so `upper/` holds full file contents and plain
+  directories, and the diff can rely on it.
+- **File access.** The root mount uses `--file-access=shared`. With `exclusive`, gVisor caches
+  failed lookups, so a file copied in after the sandbox looked for it stays invisible (measured).
+  Sandbox writes reach `upper/` immediately in either mode.
 - **Init.** The sandbox's PID 1 is the static `qt-agent pause`, bind-mounted read-only at
   `/.qt/qt-agent`. It reaps orphans and ignores signals. It runs as its own non-root uid (65533),
   because gVisor does not shield PID 1 from `kill -9` inside its pid namespace; with a different
@@ -99,6 +104,28 @@ before it reaches a backend.
 Image layers are untrusted. Unpacking goes through an `os.Root`, so no entry name, symlink or hard
 link can reach outside the rootfs. Device nodes and fifos are skipped, setuid/setgid bits are
 dropped, and total size and entry count are bounded.
+
+## Workspace: diff and copy (M1-T2)
+
+`internal/workspace` reads a sandbox's layers from the host, never from the guest.
+
+- **Diff** walks `upper/` against the image (`lower`). A 0/0 char device is a deleted entry (all
+  of its lower contents are reported deleted); an opaque directory hides the lower one, so its
+  lower-only entries are deleted; anything else is added or modified. A copy-up with the same
+  content, mode and owner is not reported. Regular files carry size and sha256, symlinks their
+  target. qt's `/.qt` is hidden, and runtime mount points (`/proc`, `/dev`, `/tmp`, ...) are not
+  reported as created, so a fresh sandbox diffs empty. At most 100k changes (`truncated`).
+- **Untrusted names.** Everything in `upper/` was written by sandboxed code. The walk uses
+  `os.Root` and follows nothing. Files are opened `O_NOFOLLOW|O_NONBLOCK` (a planted fifo can't
+  hang qtd) and must be the inode that was listed. Names reach the API as data: non-UTF-8 names
+  travel as raw bytes next to a lossy string, and `qt diff` quotes names with control
+  characters, so escape sequences never reach the terminal.
+- **Copy in** extracts a tar through the merged overlay with the same safe unpacker as images.
+  It resolves the destination inside the sandbox's root (planted symlinks can't redirect it to
+  the host), makes the sandbox user the owner of every entry, and drops setuid bits and device
+  nodes. **Copy out** writes a tar the same careful way (symlinks stored, never followed;
+  special files skipped). `qt cp` unpacks it on the host with the safe unpacker, so output can't
+  land outside the destination directory.
 
 `qt rm` deletes `sandboxes/<id>` and every host resource tied to it: cgroup, netns, tap,
 nftables sets, proxy and resolver. Tests check that nothing is left behind.

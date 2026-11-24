@@ -62,6 +62,7 @@ type boxMeta struct {
 	Workdir string     `json:"workdir"`
 	User    specs.User `json:"user"`
 	PIDs    int        `json:"pids"`
+	RootFS  string     `json:"rootfs"` // image rootfs: the overlay's lower layer
 	Created time.Time  `json:"created"`
 }
 
@@ -95,7 +96,7 @@ func (*Backend) Name() backend.Isolation { return backend.IsolationGVisor }
 func (*Backend) Capabilities() backend.Capabilities { return backend.CapPTY }
 
 func (b *Backend) globalArgs() []string {
-	args := []string{"--root", b.cfg.StateDir, "--network=none", "--overlay2=none", "--oci-seccomp"}
+	args := []string{"--root", b.cfg.StateDir, "--network=none", "--overlay2=none", "--file-access=shared", "--oci-seccomp"}
 	if b.cfg.Platform != "" {
 		args = append(args, "--platform="+b.cfg.Platform)
 	}
@@ -197,7 +198,7 @@ func (b *Backend) Create(ctx context.Context, s backend.Spec) (err error) {
 	if err != nil {
 		return fmt.Errorf("gvisor: %w", err)
 	}
-	bx.meta = boxMeta{Env: s.Env, Workdir: s.Workdir, User: user, PIDs: s.Limits.PIDs, Created: time.Now().UTC()}
+	bx.meta = boxMeta{Env: s.Env, Workdir: s.Workdir, User: user, PIDs: s.Limits.PIDs, RootFS: s.RootFS, Created: time.Now().UTC()}
 	if err := writeJSON(filepath.Join(bundleDir(s.Workspace), "config.json"), spec); err != nil {
 		return err
 	}
@@ -612,25 +613,6 @@ func (b *Backend) Destroy(ctx context.Context, id string) error {
 		return fmt.Errorf("gvisor: destroy %s: %w", id, err)
 	}
 	return nil
-}
-
-func unsupported(what string) error {
-	return fmt.Errorf("gvisor: %s: %w (not implemented yet)", what, errors.ErrUnsupported)
-}
-
-// CopyIn implements backend.Backend (M1-T2).
-func (*Backend) CopyIn(context.Context, string, string, io.Reader) error {
-	return unsupported("copy in")
-}
-
-// CopyOut implements backend.Backend (M1-T2).
-func (*Backend) CopyOut(context.Context, string, string, io.Writer) error {
-	return unsupported("copy out")
-}
-
-// Diff implements backend.Backend (M1-T2).
-func (*Backend) Diff(context.Context, string) ([]backend.Change, error) {
-	return nil, unsupported("diff")
 }
 
 // Snapshot implements backend.Backend.
