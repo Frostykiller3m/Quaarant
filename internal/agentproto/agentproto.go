@@ -8,6 +8,8 @@
 //	copy_in:  qtd -> Data*, EOF                              agent -> Result | Error
 //	copy_out:                                                agent -> Data*, EOF | Error
 //	ping:                                                    agent -> Result
+//	configure:                                               agent -> Result
+//	events:                                                  agent -> Event* (until either side closes)
 //
 // The agent runs inside the guest: once guest code has run, nothing it sends can be trusted.
 // qtd bounds every frame, rejects unknown types, and never acts on what it is told. Only the
@@ -50,6 +52,7 @@ const (
 	FrameExit    FrameType = 19 // JSON Exit
 	FrameError   FrameType = 20 // JSON Error
 	FrameResult  FrameType = 21 // JSON Result
+	FrameEvent   FrameType = 22 // JSON Event (events stream)
 )
 
 // Ops.
@@ -60,6 +63,8 @@ const (
 	OpCopyOut = "copy_out"
 	// OpConfigure gives a VM restored from a golden snapshot its own identity.
 	OpConfigure = "configure"
+	// OpEvents subscribes to the agent's exec/file events: a long-lived stream of Event frames.
+	OpEvents = "events"
 )
 
 // Request starts an operation.
@@ -265,4 +270,15 @@ func (d *dataReader) Read(p []byte) (int, error) {
 	n := copy(p, d.buf)
 	d.buf = d.buf[n:]
 	return n, nil
+}
+
+// MaxEvent bounds one Event frame.
+const MaxEvent = 256 << 10
+
+// Event is one guest-observed event: Kind is "exec" or "file" and Data its schema v1 payload.
+// They are claims made inside the guest (source "guest" in the event log); qtd accepts no
+// other kinds from an agent, so a guest can never report network activity.
+type Event struct {
+	Kind string          `json:"kind"`
+	Data json.RawMessage `json:"data"`
 }

@@ -66,11 +66,14 @@ type Backend struct {
 }
 
 type box struct {
-	id        string
-	workspace string
-	meta      boxMeta
-	pid       int
-	exited    chan struct{} // closed when the VMM exits; nil after a qtd restart
+	id         string
+	workspace  string
+	meta       boxMeta
+	pid        int
+	exited     chan struct{}     // closed when the VMM exits; nil after a qtd restart
+	sink       backend.EventSink // the sandbox's event log; nil after a qtd restart
+	stopEvents context.CancelFunc
+	events     guestStats
 }
 
 // boxMeta is saved as <workspace>/qt.json.
@@ -156,7 +159,7 @@ func (b *Backend) Create(ctx context.Context, s backend.Spec) (err error) {
 		b.mu.Unlock()
 		return fmt.Errorf("firecracker: sandbox %s already exists", s.ID)
 	}
-	bx := &box{id: s.ID, workspace: s.Workspace, meta: boxMeta{Env: s.Env, Workdir: s.Workdir, UID: uid, GID: gid, PIDs: s.Limits.PIDs, CPU: s.Limits.CPUMillis, Memory: s.Limits.MemoryBytes, Hostname: s.Hostname, Created: time.Now().UTC()}}
+	bx := &box{id: s.ID, workspace: s.Workspace, meta: boxMeta{Env: s.Env, Workdir: s.Workdir, UID: uid, GID: gid, PIDs: s.Limits.PIDs, CPU: s.Limits.CPUMillis, Memory: s.Limits.MemoryBytes, Hostname: s.Hostname, Created: time.Now().UTC()}, sink: s.Events}
 	b.boxes[s.ID] = bx
 	b.mu.Unlock()
 	defer func() {
@@ -258,13 +261,20 @@ func (b *Backend) Start(ctx context.Context, id string) error {
 		return err
 	}
 	if bx.meta.Golden != "" {
-		return b.restore(ctx, bx, bx.meta.Hostname)
+		if err := b.restore(ctx, bx, bx.meta.Hostname); err != nil {
+			return err
+		}
+	} else {
+		exited, err := b.launch(bx, "--config-file", "/vm.json", "--api-sock", "/api.sock", "--level", "Warning")
+		if err != nil {
+			return err
+		}
+		if err := b.waitAgent(ctx, bx, exited, 30*time.Second); err != nil {
+			return err
+		}
 	}
-	exited, err := b.launch(bx, "--config-file", "/vm.json", "--api-sock", "/api.sock", "--level", "Warning")
-	if err != nil {
-		return err
-	}
-	return b.waitAgent(ctx, bx, exited, 30*time.Second)
+	b.subscribeEvents(bx) // guest exec/file events -> the event log
+	return nil
 }
 
 // launch runs the jailer, which sets up the chroot, uid and cgroup and becomes firecracker
@@ -473,6 +483,11 @@ func (b *Backend) Destroy(ctx context.Context, id string) error {
 	if err != nil {
 		return nil // unknown or already destroyed
 	}
+	b.mu.Lock()
+	if bx.stopEvents != nil {
+		bx.stopEvents()
+	}
+	b.mu.Unlock()
 	if bx.pid > 0 && b.alive(bx) {
 		killPID(bx.pid)
 		if bx.exited != nil {

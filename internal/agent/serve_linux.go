@@ -25,6 +25,13 @@ var copyLimits = safetar.UnpackLimits{MaxBytes: 8 << 30, MaxEntries: 1_000_000}
 
 // Serve listens on vsock and handles qtd's requests, one connection per operation.
 func Serve() int {
+	col := newCollector()
+	if err := col.watchFiles(); err != nil {
+		fmt.Fprintln(os.Stderr, "qt-agent serve: file events off:", err)
+	}
+	if err := col.watchExec(); err != nil {
+		fmt.Fprintln(os.Stderr, "qt-agent serve: exec events off:", err)
+	}
 	l, err := listenVsock(agentproto.Port)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "qt-agent serve:", err)
@@ -37,11 +44,11 @@ func Serve() int {
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
-		go handle(conn)
+		go handle(conn, col)
 	}
 }
 
-func handle(conn *os.File) {
+func handle(conn *os.File, col *collector) {
 	defer func() { _ = conn.Close() }()
 	w := agentproto.NewWriter(conn)
 	t, payload, err := agentproto.ReadFrame(conn, agentproto.MaxFrame)
@@ -76,7 +83,10 @@ func handle(conn *os.File) {
 			_ = w.JSON(agentproto.FrameError, agentproto.Error{Message: err.Error()})
 			return
 		}
+		col.reset() // the golden VM's boot is not this sandbox's activity
 		_ = w.JSON(agentproto.FrameResult, agentproto.Result{Version: version.Get().Version, Kernel: kernelRelease()})
+	case agentproto.OpEvents:
+		col.streamEvents(w)
 	case agentproto.OpCopyOut:
 		if err := copyOut(w, req.Path); err != nil {
 			_ = w.JSON(agentproto.FrameError, agentproto.Error{Message: err.Error()})

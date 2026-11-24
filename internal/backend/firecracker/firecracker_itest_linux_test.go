@@ -3,6 +3,7 @@
 package firecracker
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -15,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -330,6 +332,122 @@ func TestITestRestoredAreUnique(t *testing.T) {
 		t.Logf("dmsetup ls:\n%s", out)
 		if strings.Count(string(out), ds.pool.name+"-") != 1 { // only ub's volume (the golden one is inactive)
 			t.Errorf("thin volumes after rm: %s", out)
+		}
+	}
+}
+
+type recSink struct {
+	mu   sync.Mutex
+	evs  []string
+	errs []error
+}
+
+func (r *recSink) Emit(_ context.Context, src events.Source, p events.Payload) error {
+	ev, err := events.New("vmev", src, time.Now(), p)
+	if err == nil {
+		var raw []byte
+		if raw, err = json.Marshal(ev); err == nil {
+			_, err = events.Validate(raw)
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err != nil {
+		r.errs = append(r.errs, err)
+		return err
+	}
+	r.evs = append(r.evs, string(ev.Kind)+" "+string(ev.Source)+" "+string(ev.Data))
+	return nil
+}
+
+func (r *recSink) lines() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.evs...)
+}
+
+// TestITestVMEvents: qt-agent reports exec (proc connector) and file activity (fanotify) in
+// the event schema, as guest claims; the guest reports no network activity; qt's own copy-in
+// and the golden VM's boot are not in the log.
+func TestITestVMEvents(t *testing.T) {
+	v := setupVM(t)
+	rec := &recSink{}
+	s := backend.Spec{
+		ID: "vmev", Image: v.Img.Ref, RootFS: v.Ext4, Workspace: filepath.Join(v.Data, "sb", "vmev"),
+		Hostname: "qt-vmev", User: "65534:65534", Env: []string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "HOME=/tmp"},
+		Limits: backend.DefaultLimits, Network: backend.Network{None: true}, Events: rec,
+	}
+	if err := os.MkdirAll(s.Workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := v.B.Create(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = v.B.Destroy(context.Background(), s.ID) })
+	if err := v.B.Start(ctx, s.ID); err != nil {
+		t.Fatal(err)
+	}
+	var tb bytes.Buffer
+	tw := tar.NewWriter(&tb)
+	_ = tw.WriteHeader(&tar.Header{Name: "copied.txt", Mode: 0o644, Size: 2, Typeflag: tar.TypeReg})
+	_, _ = tw.Write([]byte("hi"))
+	_ = tw.Close()
+	if err := v.B.CopyIn(ctx, s.ID, "/work", &tb); err != nil {
+		t.Fatal(err)
+	}
+	out, errs, st := v.exec(t, s.ID, backend.ExecSpec{Argv: []string{"/bin/sh", "-c", `cat /etc/os-release >/dev/null; sleep 1; echo data > /tmp/f; mkdir /tmp/d; ln -s /etc/passwd /tmp/l
+		mv /tmp/f /tmp/g; rm /tmp/g; chmod 700 /tmp/d; nc -w 1 192.0.2.7 80 </dev/null 2>/dev/null; true`}})
+	if st.Code != 0 {
+		t.Fatalf("exec: %q %q %+v", out, errs, st)
+	}
+	time.Sleep(time.Second)
+	lines := rec.lines()
+	for _, l := range lines {
+		t.Log(l)
+	}
+	for _, e := range rec.errs {
+		t.Errorf("invalid event: %v", e)
+	}
+	want := [][]string{
+		{`exec guest`, `"argv":["/bin/sh","-c",`},
+		// argv and uid are read from /proc: assert them on a process that lives long enough
+		// (one that exits within ~1 ms is reported with argv_truncated; see BUILD_PLAN M2-T3), and
+		// one that does not rewrite its own argv (busybox sleep does, briefly, for "0.3").
+		{`exec guest`, `"path":"/bin/busybox"`, `"argv":["sleep","1"]`, `"uid":65534`},
+		{`file guest`, `"op":"open"`, `os-release"`}, // fanotify reports the file opened: /usr/lib/os-release (alpine's /etc/os-release is a symlink)
+		{`file guest`, `"op":"create"`, `"path":"/tmp/f"`},
+		{`file guest`, `"op":"write"`, `"path":"/tmp/f"`, `"bytes":5`},
+		{`file guest`, `"op":"mkdir"`, `"path":"/tmp/d"`},
+		{`file guest`, `"op":"symlink"`, `"path":"/tmp/l"`, `"new_path":"/etc/passwd"`},
+		{`file guest`, `"op":"rename"`, `"path":"/tmp/f"`, `"new_path":"/tmp/g"`},
+		{`file guest`, `"op":"unlink"`, `"path":"/tmp/g"`},
+		{`file guest`, `"op":"chmod"`, `"path":"/tmp/d"`, `"mode":"0700"`},
+		{`exec guest`, `"path":"/bin/busybox"`, `"ppid":`}, // every exec has a binary and a parent, even if it exits at once
+	}
+	for _, w := range want {
+		found := false
+		for _, l := range lines {
+			ok := true
+			for _, s := range w {
+				ok = ok && strings.Contains(l, s)
+			}
+			found = found || ok
+		}
+		if !found {
+			t.Errorf("no event with %q", w)
+		}
+	}
+	for _, l := range lines {
+		switch {
+		case strings.HasPrefix(l, "net "), strings.HasPrefix(l, "dns "):
+			t.Errorf("a network event came from the guest: %s", l)
+		case strings.Contains(l, "/work/copied.txt"), strings.Contains(l, "/.qt/"), strings.Contains(l, "/newroot"):
+			t.Errorf("qt's own activity (copy-in, agent, boot) was reported: %s", l)
+		case !strings.Contains(l, " guest "):
+			t.Errorf("not marked as a guest claim: %s", l)
+		case strings.HasPrefix(l, "exec ") && strings.Contains(l, `"path":"/lib/ld-`):
+			t.Errorf("exec reported the ELF interpreter instead of the binary: %s", l)
 		}
 	}
 }
