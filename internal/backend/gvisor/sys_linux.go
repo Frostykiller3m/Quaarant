@@ -19,11 +19,22 @@ import (
 const cgroupRoot = "/sys/fs/cgroup"
 
 func mountOverlay(lower, upper, work, target string) error {
-	opts := "lowerdir=" + lower + ",upperdir=" + upper + ",workdir=" + work
+	// metacopy/redirect_dir off: every changed file keeps its full content in upper, and renamed
+	// directories are copied, so upper alone (plus whiteouts) describes all changes.
+	opts := "lowerdir=" + lower + ",upperdir=" + upper + ",workdir=" + work + ",redirect_dir=off,metacopy=off,index=off"
 	if err := unix.Mount("overlay", target, "overlay", unix.MS_NODEV, opts); err != nil {
 		return fmt.Errorf("mount overlay on %s: %w", target, err)
 	}
 	return nil
+}
+
+// mounted reports whether target is a mount point on a different filesystem than parent.
+func mounted(target, parent string) bool {
+	var a, b unix.Stat_t
+	if unix.Lstat(target, &a) != nil || unix.Lstat(parent, &b) != nil {
+		return false
+	}
+	return a.Dev != b.Dev
 }
 
 func unmount(target string) error {

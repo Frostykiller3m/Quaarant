@@ -3,9 +3,12 @@
 package daemon
 
 import (
+	"archive/tar"
 	"bufio"
+	"bytes"
 	"context"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -96,11 +99,50 @@ func TestITestDaemonGVisor(t *testing.T) {
 		t.Errorf("list = %v %v", list, err)
 	}
 
+	// Copy files in over the real RPC, let the sandbox change them, and diff.
+	var tarBuf bytes.Buffer
+	tw := tar.NewWriter(&tarBuf)
+	_ = tw.WriteHeader(&tar.Header{Name: "in.txt", Mode: 0o644, Size: 3, Typeflag: tar.TypeReg})
+	_, _ = tw.Write([]byte("abc"))
+	_ = tw.Close()
+	cin, err := h.client.CopyIn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = cin.Send(&qtdv1.CopyInRequest{Msg: &qtdv1.CopyInRequest_Header_{Header: &qtdv1.CopyInRequest_Header{SandboxId: id, Dir: "/work"}}})
+	_ = cin.Send(&qtdv1.CopyInRequest{Msg: &qtdv1.CopyInRequest_TarChunk{TarChunk: tarBuf.Bytes()}})
+	if resp, err := cin.CloseAndRecv(); err != nil || resp.GetFiles() != 1 {
+		t.Fatalf("copy in = %v, %v", resp, err)
+	}
+	if r := h.exec(t, start(id, "sh", "-c", "cat /work/in.txt; echo def >> /work/in.txt")); r.stdout != "abc" {
+		t.Errorf("sandbox read %q", r.stdout)
+	}
+	diff, err := h.client.Diff(context.Background(), &qtdv1.DiffRequest{SandboxId: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	for _, c := range diff.GetChanges() {
+		paths = append(paths, c.GetPath())
+	}
+	if strings.Join(paths, " ") != "/tmp/f /work /work/in.txt" {
+		t.Errorf("diff paths = %v", paths)
+	}
+
 	if _, err := h.client.Destroy(context.Background(), &qtdv1.DestroyRequest{SandboxId: id}); err != nil {
 		t.Fatalf("destroy: %v", err)
 	}
 	// Nothing left: no sandbox dir, no mounts under the data dir, no cgroup, no runsc container.
 	assertEmptyDir(t, filepath.Join(data, "sandboxes"))
+	// The whole data dir holds only the image cache and the (empty) sandboxes dir.
+	_ = filepath.WalkDir(data, func(p string, _ fs.DirEntry, err error) error {
+		rel, _ := filepath.Rel(data, p)
+		if err != nil || rel == "." || rel == "sandboxes" || rel == "images" || strings.HasPrefix(rel, "images"+string(filepath.Separator)) {
+			return nil
+		}
+		t.Errorf("left in the data dir after rm: %s", rel)
+		return nil
+	})
 	if m := mountsUnder(t, data); len(m) != 0 {
 		t.Errorf("mounts left under the data dir: %v", m)
 	}

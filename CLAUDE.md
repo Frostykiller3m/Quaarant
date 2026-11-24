@@ -29,7 +29,8 @@ make build && sudo make install   # qt, qtd → /usr/local/bin, qt-agent → /us
 ```
 
 Manual run: `sudo systemctl enable --now qtd`, be in the `quarantine` group, then
-`qt run alpine -- sh -c 'echo hi'`, `qt shell <id>`, `qt ls`, `qt rm <id>`. Lint with
+`qt run alpine -- sh -c 'echo hi'`, `qt shell <id>`, `qt cp ./dir <id>:/work`, `qt diff <id>`,
+`qt ls`, `qt rm <id>`. Lint with
 `GOOS=windows` too: Windows must keep building.
 
 ## Invariants (security — do not break)

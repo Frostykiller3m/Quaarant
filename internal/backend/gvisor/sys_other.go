@@ -16,6 +16,7 @@ var errLinuxOnly = errors.New("the gvisor backend needs Linux")
 
 func mountOverlay(_, _, _, _ string) error          { return errLinuxOnly }
 func unmount(string) error                          { return nil }
+func mounted(string, string) bool                   { return false }
 func ensureCgroupParent(string) error               { return errLinuxOnly }
 func removeCgroup(string) error                     { return nil }
 func openPTY() (*os.File, *os.File, error)          { return nil, nil, errLinuxOnly }

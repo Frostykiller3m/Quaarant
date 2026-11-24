@@ -3,9 +3,13 @@
 package gvisor
 
 import (
+	"archive/tar"
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -281,7 +285,7 @@ func TestITestRunExecDestroy(t *testing.T) {
 	if err := it.b.Destroy(context.Background(), s.ID); err != nil {
 		t.Fatal(err)
 	}
-	if mounted(t, rootfsDir(s.Workspace)) {
+	if inMountinfo(t, rootfsDir(s.Workspace)) {
 		t.Error("overlay still mounted after destroy")
 	}
 	if _, err := it.b.Info(context.Background(), s.ID); err == nil {
@@ -298,7 +302,7 @@ func TestITestRunExecDestroy(t *testing.T) {
 	}
 }
 
-func mounted(t *testing.T, path string) bool {
+func inMountinfo(t *testing.T, path string) bool {
 	t.Helper()
 	f, err := os.Open("/proc/self/mountinfo")
 	if err != nil {
@@ -329,7 +333,138 @@ func TestITestRecoverAfterRestart(t *testing.T) {
 	if err := b2.Destroy(context.Background(), s.ID); err != nil {
 		t.Fatal(err)
 	}
-	if mounted(t, rootfsDir(s.Workspace)) {
+	if inMountinfo(t, rootfsDir(s.Workspace)) {
 		t.Error("overlay still mounted")
+	}
+}
+
+func tarStream(t *testing.T, entries ...tarEntry) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for _, e := range entries {
+		h := &tar.Header{Name: e.name, Mode: e.mode, Typeflag: e.typ, Linkname: e.link, Size: int64(len(e.body)), Uid: 0, Gid: 0}
+		if e.typ != tar.TypeReg {
+			h.Size = 0
+		}
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+		if e.typ == tar.TypeReg {
+			_, _ = tw.Write([]byte(e.body))
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return &buf
+}
+
+type tarEntry struct {
+	name, body, link string
+	typ              byte
+	mode             int64
+}
+
+func TestITestCopyAndDiff(t *testing.T) {
+	it := setupITest(t)
+	s := it.start(t, "it3", backend.DefaultLimits)
+	ctx := context.Background()
+
+	// A fresh sandbox has no changes: qt's and the runtime's own files are not reported.
+	if ch, err := it.b.Diff(ctx, s.ID); err != nil || len(ch) != 0 {
+		t.Fatalf("fresh diff = %+v, %v; want empty", ch, err)
+	}
+	// The sandbox looks for /work/late before it exists (gVisor would cache the miss in
+	// --file-access=exclusive mode and never see the copied file).
+	_ = it.exec(t, s.ID, sh("cat /work/late 2>/dev/null; ls /work 2>/dev/null; true"))
+
+	in := tarStream(t,
+		tarEntry{name: "repo/", typ: tar.TypeDir, mode: 0o755},
+		tarEntry{name: "repo/main.sh", typ: tar.TypeReg, mode: 0o4755, body: "#!/bin/sh\necho hi\n"},
+		tarEntry{name: "repo/README", typ: tar.TypeReg, mode: 0o644, body: "read me"},
+		tarEntry{name: "repo/link", typ: tar.TypeSymlink, link: "/etc/passwd"},
+		tarEntry{name: "late", typ: tar.TypeReg, mode: 0o644, body: "late\n"},
+		tarEntry{name: "dev-null", typ: tar.TypeChar, mode: 0o666},
+	)
+	if err := it.b.CopyIn(ctx, s.ID, "/work", in); err != nil {
+		t.Fatalf("copy in: %v", err)
+	}
+	r := it.exec(t, s.ID, sh("cat /work/late; stat -c '%u:%g %a' /work /work/repo/main.sh; /work/repo/main.sh; readlink /work/repo/link; ls /work"))
+	want := "late\n65534:65534 755\n65534:65534 755\nhi\n/etc/passwd\nlate\nrepo\n"
+	if r.stdout != want {
+		t.Errorf("inside after copy in:\n%q\nwant\n%q (stderr %q)", r.stdout, want, r.stderr)
+	}
+
+	// The sandbox changes things; the host sees it at once.
+	r = it.exec(t, s.ID, sh("echo out > /tmp/out && echo more >> /work/repo/main.sh && rm /work/repo/README && mkdir /work/new && ln -s /root /tmp/l"))
+	if r.status.Code != 0 {
+		t.Fatalf("changes: %+v", r)
+	}
+	changes, err := it.b.Diff(ctx, s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range changes {
+		line := string(c.Kind) + " " + c.Path
+		if c.SHA256 != "" {
+			line += fmt.Sprintf(" %d %s", c.Size, c.SHA256[:8])
+		}
+		if c.LinkTarget != "" {
+			line += " -> " + c.LinkTarget
+		}
+		got = append(got, line)
+	}
+	sum := func(s string) string { h := sha256.Sum256([]byte(s)); return fmt.Sprintf("%d %x", len(s), h[:4]) }
+	wantDiff := []string{
+		"added /tmp/l -> /root",
+		"added /tmp/out " + sum("out\n"),
+		"added /work",
+		"added /work/late " + sum("late\n"),
+		"added /work/new",
+		"added /work/repo",
+		"added /work/repo/link -> /etc/passwd",
+		"added /work/repo/main.sh " + sum("#!/bin/sh\necho hi\nmore\n"),
+	}
+	if strings.Join(got, "\n") != strings.Join(wantDiff, "\n") {
+		t.Errorf("diff while running:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(wantDiff, "\n"))
+	}
+
+	// Copy out: a tar of /work/repo with the sandbox's latest content.
+	var out bytes.Buffer
+	if err := it.b.CopyOut(ctx, s.ID, "/work/repo", &out); err != nil {
+		t.Fatal(err)
+	}
+	tr := tar.NewReader(&out)
+	files := map[string]string{}
+	for {
+		h, err := tr.Next()
+		if err != nil {
+			break
+		}
+		b, _ := io.ReadAll(tr)
+		files[h.Name] = string(b) + h.Linkname
+	}
+	if files["repo/main.sh"] != "#!/bin/sh\necho hi\nmore\n" || files["repo/link"] != "/etc/passwd" || len(files) != 3 {
+		t.Errorf("copy out = %q", files)
+	}
+
+	// Escapes: a ".." entry, and symlinks the sandbox plants on the way, never reach the host.
+	if err := it.b.CopyIn(ctx, s.ID, "/work", tarStream(t, tarEntry{name: "../../../../evil", typ: tar.TypeReg, body: "x"})); err == nil {
+		t.Error("copy in with a .. entry succeeded")
+	}
+	_ = it.exec(t, s.ID, sh("ln -s / /tmp/abs; ln -s ../../../../../../.. /tmp/up"))
+	for _, dir := range []string{"/tmp/abs", "/tmp/up", "/tmp/up/etc"} {
+		err := it.b.CopyIn(ctx, s.ID, dir, tarStream(t, tarEntry{name: "evil", typ: tar.TypeReg, body: "x", mode: 0o644}))
+		t.Logf("copy in to %s: %v", dir, err)
+	}
+	if err := it.b.CopyOut(ctx, s.ID, "/tmp/up/etc/shadow", io.Discard); err == nil {
+		t.Error("copy out through a planted symlink succeeded")
+	}
+	for _, p := range []string{filepath.Join(it.data, "evil"), filepath.Join(s.Workspace, "evil"), "/evil", "/etc/evil"} {
+		if _, err := os.Lstat(p); err == nil {
+			t.Errorf("escaped to the host: %s", p)
+		}
 	}
 }

@@ -39,12 +39,32 @@ type UnpackStats struct {
 // fifos are skipped, setuid/setgid bits are dropped, and sizes are bounded by lim. When chown
 // is true (qtd runs as root), file ownership from the image is kept.
 func Unpack(r io.Reader, dst string, lim UnpackLimits, chown bool) (UnpackStats, error) {
-	var st UnpackStats
 	root, err := os.OpenRoot(dst)
 	if err != nil {
-		return st, fmt.Errorf("open unpack root: %w", err)
+		return UnpackStats{}, fmt.Errorf("open unpack root: %w", err)
 	}
 	defer func() { _ = root.Close() }()
+	var own Ownership = KeepOwner
+	if !chown {
+		own = nil
+	}
+	return UnpackInto(r, root, lim, own)
+}
+
+// Ownership decides the owner of each unpacked entry; nil leaves files owned by the caller.
+type Ownership func(hdr *tar.Header) (uid, gid int)
+
+// KeepOwner keeps the uid/gid recorded in the archive (image layers).
+func KeepOwner(hdr *tar.Header) (int, int) { return hdr.Uid, hdr.Gid }
+
+// OwnedBy gives every entry the same owner (files copied into a sandbox belong to its user).
+func OwnedBy(uid, gid int) Ownership { return func(*tar.Header) (int, int) { return uid, gid } }
+
+// UnpackInto is Unpack into an already opened root, with ownership chosen by own (nil = don't
+// chown). The same guarantees hold: nothing outside root can be touched.
+func UnpackInto(r io.Reader, root *os.Root, lim UnpackLimits, own Ownership) (UnpackStats, error) {
+	var st UnpackStats
+	chown := own != nil
 
 	type dirMode struct {
 		name  string
@@ -120,7 +140,8 @@ func Unpack(r io.Reader, dst string, lim UnpackLimits, chown bool) (UnpackStats,
 			continue
 		}
 		if chown {
-			if err := root.Lchown(name, hdr.Uid, hdr.Gid); err != nil {
+			uid, gid := own(hdr)
+			if err := root.Lchown(name, uid, gid); err != nil {
 				return st, fmt.Errorf("chown %s: %w", name, err)
 			}
 			if hdr.Typeflag == tar.TypeReg || hdr.Typeflag == tar.TypeDir {
