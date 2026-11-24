@@ -231,7 +231,7 @@ func vmBackend(c runConfig, agentPath string, log *slog.Logger) (backend.Backend
 	jailer, _ = filepath.Abs(jailer)
 	b, err := firecracker.New(firecracker.Config{
 		Firecracker: fc, Jailer: jailer, Kernel: c.vmKernel, AgentPath: agentPath,
-		StateDir: c.fcState, CgroupParent: c.cgroupParent, Logger: log,
+		StateDir: c.fcState, CgroupParent: c.cgroupParent, DataDir: c.dataDir, Logger: log,
 	})
 	if err != nil {
 		return nil, err.Error()

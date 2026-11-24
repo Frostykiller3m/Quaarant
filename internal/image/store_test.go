@@ -223,3 +223,37 @@ func tarOf(t *testing.T, entries ...entry) *bytes.Buffer {
 	}
 	return &buf
 }
+
+func TestPullSkipsTheRegistryWhenItCan(t *testing.T) {
+	img := testImage(t)
+	var fetches atomic.Int32
+	s := testStore(t, img, &fetches)
+	ctx := context.Background()
+	got, err := s.Pull(ctx, "example.com/app:1")
+	if err != nil || fetches.Load() != 1 {
+		t.Fatalf("first pull: %v, %d fetches", err, fetches.Load())
+	}
+	// Same tag within TagTTL, and the digest itself: no registry round trip.
+	for _, ref := range []string{"example.com/app:1", got.Ref} {
+		if again, err := s.Pull(ctx, ref); err != nil || again.RootFS != got.RootFS {
+			t.Fatalf("pull %s: %+v %v", ref, again, err)
+		}
+	}
+	if fetches.Load() != 1 {
+		t.Errorf("fetched %d times, want 1", fetches.Load())
+	}
+	// With TagTTL 0 every tag pull asks the registry (a digest still doesn't).
+	s.TagTTL = 0
+	if _, err := s.Pull(ctx, "example.com/app:1"); err != nil || fetches.Load() != 2 {
+		t.Errorf("tag with TTL 0: %v, %d fetches", err, fetches.Load())
+	}
+	if _, err := s.Pull(ctx, got.Ref); err != nil || fetches.Load() != 2 {
+		t.Errorf("digest: %v, %d fetches", err, fetches.Load())
+	}
+	// An unknown digest is fetched.
+	other := "example.com/app@sha256:" + strings.Repeat("1", 64)
+	_, _ = s.Pull(ctx, other)
+	if fetches.Load() != 3 {
+		t.Errorf("unknown digest: %d fetches, want 3", fetches.Load())
+	}
+}

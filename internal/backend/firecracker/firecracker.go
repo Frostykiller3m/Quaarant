@@ -43,7 +43,11 @@ type Config struct {
 	AgentPath    string // static qt-agent binary (becomes the initramfs /init)
 	StateDir     string // per-sandbox state and the initramfs cache; default /run/quarantine/fc
 	CgroupParent string // default /quarantine
-	Logger       *slog.Logger
+	// DataDir holds golden snapshots (<DataDir>/golden) and the thin pool (<DataDir>/thin).
+	// Empty: every sandbox boots cold from a full disk copy.
+	DataDir  string
+	NoGolden bool // boot cold even with a DataDir
+	Logger   *slog.Logger
 }
 
 // DefaultDiskBytes is a sandbox's disk size when the caller sets none (sparse on the host).
@@ -54,6 +58,11 @@ type Backend struct {
 	cfg   Config
 	mu    sync.Mutex
 	boxes map[string]*box
+
+	goldenLocks sync.Map // key -> *sync.Mutex
+	dsOnce      sync.Once
+	ds          *diskStore
+	dsErr       error
 }
 
 type box struct {
@@ -66,14 +75,17 @@ type box struct {
 
 // boxMeta is saved as <workspace>/qt.json.
 type boxMeta struct {
-	Env     []string  `json:"env"`
-	Workdir string    `json:"workdir"`
-	UID     uint32    `json:"uid"`
-	GID     uint32    `json:"gid"`
-	PIDs    int       `json:"pids"`
-	CPU     int       `json:"cpu_millis"`
-	Memory  int64     `json:"memory_bytes"`
-	Created time.Time `json:"created"`
+	Env      []string  `json:"env"`
+	Workdir  string    `json:"workdir"`
+	UID      uint32    `json:"uid"`
+	GID      uint32    `json:"gid"`
+	PIDs     int       `json:"pids"`
+	CPU      int       `json:"cpu_millis"`
+	Memory   int64     `json:"memory_bytes"`
+	Hostname string    `json:"hostname"`
+	Golden   string    `json:"golden,omitempty"` // restored from this golden snapshot
+	Disk     diskRef   `json:"disk"`
+	Created  time.Time `json:"created"`
 }
 
 // stateFile (<StateDir>/<id>.json) lets a restarted qtd find a running VM.
@@ -144,7 +156,7 @@ func (b *Backend) Create(ctx context.Context, s backend.Spec) (err error) {
 		b.mu.Unlock()
 		return fmt.Errorf("firecracker: sandbox %s already exists", s.ID)
 	}
-	bx := &box{id: s.ID, workspace: s.Workspace, meta: boxMeta{Env: s.Env, Workdir: s.Workdir, UID: uid, GID: gid, PIDs: s.Limits.PIDs, CPU: s.Limits.CPUMillis, Memory: s.Limits.MemoryBytes, Created: time.Now().UTC()}}
+	bx := &box{id: s.ID, workspace: s.Workspace, meta: boxMeta{Env: s.Env, Workdir: s.Workdir, UID: uid, GID: gid, PIDs: s.Limits.PIDs, CPU: s.Limits.CPUMillis, Memory: s.Limits.MemoryBytes, Hostname: s.Hostname, Created: time.Now().UTC()}}
 	b.boxes[s.ID] = bx
 	b.mu.Unlock()
 	defer func() {
@@ -170,20 +182,22 @@ func (b *Backend) Create(ctx context.Context, s backend.Spec) (err error) {
 	if err := os.Chown(root, jid, jid); err != nil { // the VMM creates its sockets here
 		return fmt.Errorf("firecracker: jail: %w", err)
 	}
-	initrd, err := cachedInitrd(filepath.Join(b.cfg.StateDir, "initrd"), b.cfg.AgentPath)
-	if err != nil {
-		return fmt.Errorf("firecracker: %w", err)
-	}
-	for src, dst := range map[string]string{b.cfg.Kernel: "vmlinux", initrd: "initrd.cpio"} {
-		if err := linkOrCopy(src, filepath.Join(root, dst), 0o444); err != nil {
-			return fmt.Errorf("firecracker: %w", err)
-		}
-	}
-	disk := filepath.Join(root, "disk.ext4")
 	size := s.Limits.DiskBytes
 	if size == 0 {
 		size = DefaultDiskBytes
 	}
+	// Fast path: restore this image's golden snapshot onto a copy-on-write disk clone.
+	if g := b.golden(ctx, s, size); g != nil {
+		if err := b.prepareRestore(ctx, bx, g, root, jid); err != nil {
+			return err
+		}
+		return writeJSON(filepath.Join(s.Workspace, "qt.json"), bx.meta)
+	}
+	// Cold boot: kernel + initramfs + a full disk copy.
+	if err := b.linkBoot(root); err != nil {
+		return err
+	}
+	disk := filepath.Join(root, "disk.ext4")
 	if err := prepareDisk(ctx, s.RootFS, disk, size, jid); err != nil {
 		return fmt.Errorf("firecracker: %w", err)
 	}
@@ -243,37 +257,56 @@ func (b *Backend) Start(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if bx.meta.Golden != "" {
+		return b.restore(ctx, bx, bx.meta.Hostname)
+	}
+	exited, err := b.launch(bx, "--config-file", "/vm.json", "--api-sock", "/api.sock", "--level", "Warning")
+	if err != nil {
+		return err
+	}
+	return b.waitAgent(ctx, bx, exited, 30*time.Second)
+}
+
+// launch runs the jailer, which sets up the chroot, uid and cgroup and becomes firecracker
+// with fcArgs.
+func (b *Backend) launch(bx *box, fcArgs ...string) (chan struct{}, error) {
 	if err := cgroups.EnsureParent(b.cfg.CgroupParent); err != nil {
-		return fmt.Errorf("firecracker: cgroup parent: %w", err)
+		return nil, fmt.Errorf("firecracker: cgroup parent: %w", err)
 	}
 	cons, err := os.OpenFile(filepath.Join(bx.workspace, "console.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return fmt.Errorf("firecracker: console log: %w", err)
+		return nil, fmt.Errorf("firecracker: console log: %w", err)
 	}
 	defer func() { _ = cons.Close() }()
-	jid := strconv.Itoa(jailID(id))
+	jid := strconv.Itoa(jailID(bx.id))
 	l := limitsFor(bx.meta)
-	//nolint:gosec // G204: binaries from config, arguments built from validated values
-	cmd := exec.Command(b.cfg.Jailer,
-		"--id", containerID(id), "--exec-file", b.cfg.Firecracker,
+	args := []string{
+		"--id", containerID(bx.id), "--exec-file", b.cfg.Firecracker,
 		"--uid", jid, "--gid", jid,
 		"--chroot-base-dir", filepath.Join(bx.workspace, "j"),
 		"--cgroup-version", "2", "--parent-cgroup", strings.TrimPrefix(b.cfg.CgroupParent, "/"),
-		"--cgroup", "cpu.max="+l.cpuMax, "--cgroup", "memory.max="+l.memMax, "--cgroup", "pids.max=256",
-		"--", "--config-file", "/vm.json", "--api-sock", "/api.sock", "--level", "Warning")
+		"--cgroup", "cpu.max=" + l.cpuMax, "--cgroup", "memory.max=" + l.memMax, "--cgroup", "pids.max=256",
+		"--",
+	}
+	cmd := exec.Command(b.cfg.Jailer, append(args, fcArgs...)...) //nolint:gosec // G204: binaries from config, arguments built from validated values
 	cmd.Stdout, cmd.Stderr = cons, cons
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("firecracker: start jailer: %w", err)
+		return nil, fmt.Errorf("firecracker: start jailer: %w", err)
 	}
 	exited := make(chan struct{})
 	go func() { _ = cmd.Wait(); close(exited) }()
 	b.mu.Lock()
 	bx.pid, bx.exited = cmd.Process.Pid, exited
 	b.mu.Unlock()
-	if err := writeJSON(b.statePath(id), stateFile{Workspace: bx.workspace, PID: cmd.Process.Pid}); err != nil {
-		return err
+	if err := writeJSON(b.statePath(bx.id), stateFile{Workspace: bx.workspace, PID: cmd.Process.Pid}); err != nil {
+		return nil, err
 	}
-	deadline := time.Now().Add(30 * time.Second)
+	return exited, nil
+}
+
+// waitAgent waits for the booted agent to answer a ping.
+func (b *Backend) waitAgent(ctx context.Context, bx *box, exited chan struct{}, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
 	for {
 		pctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		_, perr := b.ping(pctx, bx)
@@ -435,7 +468,7 @@ func (b *Backend) Info(_ context.Context, id string) (backend.Info, error) {
 
 // Destroy implements backend.Backend: kill the VMM, remove its cgroup and state. qtd
 // removes the workspace (which holds the jail).
-func (b *Backend) Destroy(_ context.Context, id string) error {
+func (b *Backend) Destroy(ctx context.Context, id string) error {
 	bx, err := b.lookup(id)
 	if err != nil {
 		return nil // unknown or already destroyed
@@ -457,6 +490,13 @@ func (b *Backend) Destroy(_ context.Context, id string) error {
 		}
 	}
 	var errs []error
+	if bx.meta.Disk.Kind == "thin" {
+		if ds, err := b.diskStore(ctx); err == nil {
+			if err := ds.remove(ctx, bx.meta.Disk); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
 	if err := cgroups.Remove(filepath.Join(b.cfg.CgroupParent, containerID(id))); err != nil {
 		errs = append(errs, err)
 	}
@@ -472,9 +512,9 @@ func (b *Backend) Destroy(_ context.Context, id string) error {
 	return nil
 }
 
-// Diff implements backend.Backend; the vm disk is not inspectable from the host yet (M2-T2).
+// Diff implements backend.Backend; the vm disk is a live guest filesystem, not inspected from the host yet.
 func (*Backend) Diff(context.Context, string) ([]backend.Change, error) {
-	return nil, fmt.Errorf("firecracker: diff: %w (arrives with copy-on-write disks in M2-T2)", errors.ErrUnsupported)
+	return nil, fmt.Errorf("firecracker: diff: %w (the disk is a live guest filesystem; not inspectable from the host yet)", errors.ErrUnsupported)
 }
 
 // Snapshot implements backend.Backend.
@@ -490,4 +530,32 @@ func (b *Backend) Restore(context.Context, backend.SnapshotRef, backend.Spec) er
 // Fork implements backend.Backend.
 func (b *Backend) Fork(context.Context, string, []backend.Spec) error {
 	return backend.Require(b, backend.CapFork)
+}
+
+// diskStore opens the copy-on-write disk store once (it may set up the thin pool).
+func (b *Backend) diskStore(ctx context.Context) (*diskStore, error) {
+	b.dsOnce.Do(func() {
+		if b.cfg.DataDir == "" {
+			b.dsErr = errors.New("firecracker: no data dir for disks")
+			return
+		}
+		b.ds, b.dsErr = newDiskStore(context.WithoutCancel(ctx), b.cfg.DataDir)
+		if b.dsErr != nil {
+			b.warn("copy-on-write disks", b.dsErr)
+			b.dsErr = nil // the copy store still works
+		}
+		if b.cfg.Logger != nil && b.ds != nil {
+			b.cfg.Logger.Info("vm disks", "kind", b.ds.kind)
+		}
+	})
+	return b.ds, b.dsErr
+}
+
+// Close releases host resources the backend set up for disks (the thin pool's device and
+// loop devices). Sandboxes must be destroyed first; qtd itself keeps the pool for its life.
+func (b *Backend) Close(ctx context.Context) error {
+	if b.ds == nil {
+		return nil
+	}
+	return b.ds.close(ctx)
 }

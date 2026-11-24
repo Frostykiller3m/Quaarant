@@ -79,6 +79,45 @@ jobs:
       - name: integration tests (QT_ITEST=1, as root)
         run: sudo env "PATH=$PATH" "HOME=$HOME" GOFLAGS=-buildvcs=false QT_ITEST=1 go test -count=1 -v -run ITest ./...
 
+  vm:
+    name: vm (firecracker, KVM, restore benchmark)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+      - name: install firecracker + jailer (release tarball, sha256 checked)
+        run: |
+          V=v1.18.0; A=x86_64; cd "$RUNNER_TEMP"
+          curl -fsSLO "https://github.com/firecracker-microvm/firecracker/releases/download/$V/firecracker-$V-$A.tgz"
+          curl -fsSLO "https://github.com/firecracker-microvm/firecracker/releases/download/$V/firecracker-$V-$A.tgz.sha256.txt"
+          sha256sum -c "firecracker-$V-$A.tgz.sha256.txt"
+          tar -xzf "firecracker-$V-$A.tgz"
+          sudo install -m 0755 "release-$V-$A/firecracker-$V-$A" /usr/local/bin/firecracker
+          sudo install -m 0755 "release-$V-$A/jailer-$V-$A" /usr/local/bin/jailer
+      - name: cache the guest kernel
+        id: kernel
+        uses: actions/cache@v4
+        with:
+          path: bin/kernel
+          key: kernel-${{ hashFiles('kernel/**', 'scripts/build-kernel.sh') }}
+      - name: build the guest kernel
+        if: steps.kernel.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq flex bison bc libelf-dev libssl-dev
+          scripts/build-kernel.sh
+      - name: vm integration tests and restore-to-exec benchmark (as root)
+        run: |
+          sudo env "PATH=$PATH" "HOME=$HOME" GOFLAGS=-buildvcs=false QT_ITEST=1 \
+            GITHUB_STEP_SUMMARY="$GITHUB_STEP_SUMMARY" \
+            go test -count=1 -v -run ITest ./internal/backend/firecracker/
+
   build:
     runs-on: ubuntu-24.04
     strategy:

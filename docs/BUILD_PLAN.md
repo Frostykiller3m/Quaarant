@@ -116,19 +116,33 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
   ctime from the unpacked files); the cache by digest makes that matter only across hosts.
 
   Follow-ups noted during M2-T1 (not done there):
-  - `qt run --rm --isolation=vm` takes ~2.2 s with a cached disk (boot is ~0.2 s): the full
-    disk copy (no reflink on ext4), resize2fs and teardown. M2-T2's golden snapshots and CoW
-    disks are the fix.
-  - `qt diff` is unsupported for vm until there are CoW disks (M2-T2).
+  - (resolved in M2-T2) `qt run --rm --isolation=vm` took ~2.2 s; now 0.25-0.30 s.
+  - (moved to M6) `qt diff` for vm.
   - vm events (exec/file) arrive in M2-T3; the vm backend declares no CapSyscallEvents.
   - CI skips the vm itests (no guest kernel there); build and cache the kernel in CI.
   - arm64: the agent and seccomp tables are ready; the kernel config fragment is x86_64 only.
   - A VM that outlives a qtd restart is found again through /run/quarantine/fc, but a host
     reboot leaves it `stopped` (like gvisor).
 
-- [ ] **M2-T2 · Fast start**
+- [x] **M2-T2 · Fast start**
       Done when: a "golden" snapshot per image; restore-to-exec under 300 ms (benchmark in
       CI, numbers in docs); CoW disks via reflink, or a device-mapper thin fallback.
+
+  Done: restore-to-exec p50 76 ms / p90 83 ms here (docs/ARCHITECTURE.md has the table; the
+  CI `vm` job runs the same benchmark, fails above 300 ms p50, and prints the table in its
+  summary). Disks: reflink where the data dir supports it, else dm-thin (used here, ext4);
+  plain copy as the last resort. Restored sandboxes get their own hostname, clock and RNG
+  (VMGenID + configure).
+
+  Follow-ups noted during M2-T2 (not done there):
+  - A golden snapshot's mem file is the VM's full RAM (2 GiB for the default 2 GiB VM) per
+    image and shape. Consider smaller default VMs, or diff/compressed memory files.
+  - Golden snapshots only exist per VM shape; non-default `--cpus/--memory` build their own.
+  - The thin pool is created at 256 GiB sparse with no monitoring of free space; add a
+    `qt doctor` check and low-water handling (dm-thin's event).
+  - `qt rm` keeps golden snapshots and the pool (caches, like images); there is no `qt gc` yet.
+  - `qt diff` for vm (mount a read-only thin snapshot of a stopped/paused disk) — M6.
+  - Snapshots are tied to this host's CPU and kernel; restoring elsewhere is unsupported.
 
 - [ ] **M2-T3 · vm events**
       Done when: qt-agent emits the same event schema (fanotify for files, proc connector or

@@ -49,9 +49,18 @@ type Store struct {
 	Fetch    FetchFunc
 	// Chown keeps image file ownership (true when running as root).
 	Chown bool
+	// TagTTL is how long a tag's resolution to a digest is reused without asking the
+	// registry (0 = always ask). Digest references to a cached image never need the network.
+	TagTTL time.Duration
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
+	tags  map[string]tagEntry
+}
+
+type tagEntry struct {
+	digest v1.Hash
+	at     time.Time
 }
 
 // NewStore returns a Store that pulls from registries for linux/GOARCH.
@@ -62,6 +71,7 @@ func NewStore(dir string) *Store {
 		Platform: v1.Platform{OS: "linux", Architecture: runtime.GOARCH},
 		Fetch:    remoteFetch,
 		Chown:    os.Geteuid() == 0,
+		TagTTL:   10 * time.Minute,
 	}
 }
 
@@ -91,6 +101,12 @@ func (s *Store) Pull(ctx context.Context, ref string) (Image, error) {
 	if err != nil {
 		return Image{}, fmt.Errorf("parse image reference %q: %w", ref, err)
 	}
+	// Already have it? A digest names exact content; a tag resolved recently is reused.
+	if d, ok := s.knownDigest(r); ok {
+		if dir := s.digestDir(d); dirExists(dir) {
+			return s.load(dir, r.Context().Digest(d.String()).String(), d.String())
+		}
+	}
 	img, err := s.Fetch(ctx, r, s.Platform)
 	if err != nil {
 		return Image{}, fmt.Errorf("fetch %s: %w", r, err)
@@ -100,6 +116,7 @@ func (s *Store) Pull(ctx context.Context, ref string) (Image, error) {
 		return Image{}, fmt.Errorf("digest of %s: %w", r, err)
 	}
 	resolved := r.Context().Digest(digest.String()).String()
+	s.rememberTag(r, digest)
 
 	lock := s.lockFor(digest.String())
 	lock.Lock()
@@ -200,3 +217,42 @@ func (c contextReader) Read(p []byte) (int, error) {
 
 // ErrNoUser is returned by LookupUser when the name is not in the image's /etc/passwd.
 var ErrNoUser = errors.New("user not found in image")
+
+func dirExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
+}
+
+// knownDigest is the digest r stands for without asking the registry: its own digest, or a
+// tag resolved less than TagTTL ago.
+func (s *Store) knownDigest(r name.Reference) (v1.Hash, bool) {
+	if d, ok := r.(name.Digest); ok {
+		h, err := v1.NewHash(d.DigestStr())
+		return h, err == nil
+	}
+	if s.TagTTL <= 0 {
+		return v1.Hash{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.tags[r.Name()]
+	if !ok || time.Since(e.at) > s.TagTTL {
+		return v1.Hash{}, false
+	}
+	return e.digest, true
+}
+
+func (s *Store) rememberTag(r name.Reference, d v1.Hash) {
+	if _, ok := r.(name.Tag); !ok {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tags == nil {
+		s.tags = map[string]tagEntry{}
+	}
+	if len(s.tags) > 4096 {
+		clear(s.tags)
+	}
+	s.tags[r.Name()] = tagEntry{digest: d, at: time.Now()}
+}

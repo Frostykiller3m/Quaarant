@@ -116,6 +116,39 @@ The two backends share integration tests, so the same command behaves the same o
 - qt boots from a `--config-file`, not the Firecracker Go SDK (no API calls are needed, and
   the SDK would add about 30 modules).
 
+### vm fast start (M2-T2)
+
+- **Golden snapshot.** The first sandbox of an image and VM shape boots a VM normally, waits
+  for its agent, pauses it, and has Firecracker write a full snapshot (`vmstate`, `mem`). The
+  VM is never resumed, so its disk stays exactly as the snapshot expects. It is keyed by image
+  disk, kernel, agent and Firecracker binary hashes, vCPUs, memory and disk size. Building a new
+  golden prunes older ones of the same image and shape.
+- **Restore.** Every later sandbox hard-links `vmstate` and `mem` into its own jail and gets a
+  copy-on-write clone of the golden disk. An empty Firecracker loads the snapshot (memory
+  mapped from the shared file, private copy-on-write) and resumes it. Then the agent's
+  `configure` sets the sandbox's hostname, wall clock and extra entropy. Firecracker also bumps
+  the VMGenID, so the guest kernel reseeds its RNG (tested: two restores read different random
+  bytes). The vsock listener survives the restore.
+- **Copy-on-write disks.** A reflink where the data dir's filesystem supports it (btrfs, xfs),
+  else a device-mapper thin pool: two sparse files on loop devices, one thin volume per golden
+  disk, and an instant thin snapshot per sandbox, given to the jail as a block-device node. The
+  pool keeps dm-thin's zeroing of new blocks, so no sandbox can read blocks freed by another.
+  Plain copies are the last resort.
+- **Numbers** (WSL2 on an i3-12100F, alpine, dm-thin, 10 runs; the CI `vm` job prints the same
+  table for GitHub's runners):
+
+  | step | p50 | p90 |
+  |---|---|---|
+  | create (thin snapshot of the disk, jail) | 28 ms | 41 ms |
+  | restore (jailer, snapshot load, resume, configure) | 46 ms | 53 ms |
+  | first exec (`true`) | 30 ms | 31 ms |
+  | **restore-to-exec** | **76 ms** | **83 ms** |
+
+  Through qtd and the CLI, `qt run --rm --isolation=vm alpine -- true` takes 0.25–0.30 s
+  (create + start + exec ≈ 120 ms, rm ≈ 170 ms); gvisor takes 0.14 s. A golden build is ~4 s
+  per image. The image store remembers tag resolutions for 10 minutes and serves cached
+  digests without asking the registry, which saved 0.5–1 s per `qt run`.
+
 ## qtd and its socket
 
 qtd runs as root under systemd (`contrib/systemd/qtd.service`, `make install`). It listens on
@@ -132,7 +165,8 @@ before it reaches a backend.
   images/sha256-<hex>/      cached by manifest digest; appears only by atomic rename after unpack
     rootfs/                 unpacked image (gvisor lower layer); rootfs.ext4 for vm (M2)
     config.json, image.json image config; what was pulled from where
-  golden/<digest>/          vm memory and disk snapshot ready to restore (M2-T2)
+  golden/<key>/             vm snapshot of a booted image: vmstate, mem (+ disk.ext4 without thin)
+  thin/                     dm-thin pool backing files (data.img, meta.img: sparse) and ids
   sandboxes/<id>/
     meta.json               image, isolation, user, env, limits, labels, created-at
     upper/, work/           writable overlay layer (or reflinked disk for vm)
