@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/qt-dev/quarantine/internal/version"
+	"github.com/Frostykiller3m/Quaarant/internal/version"
 )
 
 func main() {

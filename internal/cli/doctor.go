@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/qt-dev/quarantine/internal/doctor"
+	"github.com/Frostykiller3m/Quaarant/internal/doctor"
 )
 
 // DefaultDataDir is where qtd keeps images and sandboxes.

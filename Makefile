@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := build
 
-MODULE   := github.com/qt-dev/quarantine
+MODULE   := github.com/Frostykiller3m/Quaarant
 BINARIES := qt qtd qt-agent
 ARCHES   := amd64 arm64
 

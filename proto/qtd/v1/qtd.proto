@@ -14,7 +14,7 @@ package qtd.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/qt-dev/quarantine/internal/api/qtd/v1;qtdv1";
+option go_package = "github.com/Frostykiller3m/Quaarant/internal/api/qtd/v1;qtdv1";
 
 service SandboxService {
   // Create pulls/prepares the image and starts a new sandbox.

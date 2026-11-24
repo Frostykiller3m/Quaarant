@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/qt-dev/quarantine/internal/version"
+	"github.com/Frostykiller3m/Quaarant/internal/version"
 )
 
 func newVersionCommand() *cobra.Command {

@@ -4,7 +4,7 @@ package main
 import (
 	"os"
 
-	"github.com/qt-dev/quarantine/internal/cli"
+	"github.com/Frostykiller3m/Quaarant/internal/cli"
 )
 
 func main() {

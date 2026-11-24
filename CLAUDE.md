@@ -64,5 +64,6 @@ QT_ITEST=1 go test ./...   # integration tests (need runsc / KVM / root) — ski
 
 - The current dev machine is Windows; M0 builds natively (cross-compiling to linux). From M1 on,
   work inside WSL2 Ubuntu 24.04 (`vm` isolation also needs `nestedVirtualization=true` + `/dev/kvm`).
-- The module path `github.com/qt-dev/quarantine` is a placeholder; rename with
-  `go mod edit -module <new>` plus a search/replace of imports.
+- Module path: `github.com/Frostykiller3m/Quaarant` (repo: https://github.com/Frostykiller3m/Quaarant).
+  If the repo is renamed, update it with `go mod edit -module <new>`, a search/replace of
+  imports, `.golangci.yml`, the Makefile `MODULE`, the proto `go_package`, then `make proto`.

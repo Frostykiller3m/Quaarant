@@ -2259,7 +2259,7 @@ const file_qtd_v1_qtd_proto_rawDesc = "" +
 	"\bSnapshot\x12\x17.qtd.v1.SnapshotRequest\x1a\x18.qtd.v1.SnapshotResponse\x121\n" +
 	"\x04Fork\x12\x13.qtd.v1.ForkRequest\x1a\x14.qtd.v1.ForkResponse\x12:\n" +
 	"\aDestroy\x12\x16.qtd.v1.DestroyRequest\x1a\x17.qtd.v1.DestroyResponse\x121\n" +
-	"\x04List\x12\x13.qtd.v1.ListRequest\x1a\x14.qtd.v1.ListResponseB8Z6github.com/qt-dev/quarantine/internal/api/qtd/v1;qtdv1b\x06proto3"
+	"\x04List\x12\x13.qtd.v1.ListRequest\x1a\x14.qtd.v1.ListResponseB>Z<github.com/Frostykiller3m/Quaarant/internal/api/qtd/v1;qtdv1b\x06proto3"
 
 var (
 	file_qtd_v1_qtd_proto_rawDescOnce sync.Once

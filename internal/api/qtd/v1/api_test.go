@@ -9,9 +9,9 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	qtdv1 "github.com/qt-dev/quarantine/internal/api/qtd/v1"
-	"github.com/qt-dev/quarantine/internal/backend"
-	"github.com/qt-dev/quarantine/internal/events"
+	qtdv1 "github.com/Frostykiller3m/Quaarant/internal/api/qtd/v1"
+	"github.com/Frostykiller3m/Quaarant/internal/backend"
+	"github.com/Frostykiller3m/Quaarant/internal/events"
 )
 
 // TestServiceShape pins the RPC surface and streaming modes so changes are deliberate.

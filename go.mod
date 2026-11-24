@@ -1,4 +1,4 @@
-module github.com/qt-dev/quarantine
+module github.com/Frostykiller3m/Quaarant
 
 go 1.26.0
 
