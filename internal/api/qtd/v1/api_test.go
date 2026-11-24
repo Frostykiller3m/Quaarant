@@ -21,16 +21,19 @@ func TestServiceShape(t *testing.T) {
 		t.Fatal("SandboxService not found")
 	}
 	want := map[string][2]bool{ // name -> {client streams, server streams}
-		"Create":   {false, false},
-		"Exec":     {true, true},
-		"CopyIn":   {true, false},
-		"CopyOut":  {false, true},
-		"Diff":     {false, false},
-		"Events":   {false, true},
-		"Snapshot": {false, false},
-		"Fork":     {false, false},
-		"Destroy":  {false, false},
-		"List":     {false, false},
+		"Create":         {false, false},
+		"Exec":           {true, true},
+		"CopyIn":         {true, false},
+		"CopyOut":        {false, true},
+		"Diff":           {false, false},
+		"Events":         {false, true},
+		"Snapshot":       {false, false},
+		"Fork":           {false, false},
+		"Destroy":        {false, false},
+		"List":           {false, false},
+		"Restore":        {false, false},
+		"ListSnapshots":  {false, false},
+		"DeleteSnapshot": {false, false},
 	}
 	methods := svc.Methods()
 	if methods.Len() != len(want) {

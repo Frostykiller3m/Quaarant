@@ -90,7 +90,7 @@ proto-check: proto-lint proto ## Fail if generated code is stale
 	git diff --exit-code -- internal/api internal/gvisorpb
 
 agent-deps: ## qt-agent may only use the standard library and internal packages
-	@bad=$$(GOOS=linux $(GO) list -deps ./cmd/qt-agent | grep '\.' | grep -v '^$(MODULE)/'); \
+	@bad=$$(GOOS=linux $(GO) list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./cmd/qt-agent | grep -v '^$(MODULE)/'); \
 	if [ -n "$$bad" ]; then echo "qt-agent has third-party deps:"; echo "$$bad"; exit 1; fi; \
 	echo "qt-agent: stdlib + internal only"
 

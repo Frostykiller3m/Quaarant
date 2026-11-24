@@ -30,16 +30,19 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	SandboxService_Create_FullMethodName   = "/qtd.v1.SandboxService/Create"
-	SandboxService_Exec_FullMethodName     = "/qtd.v1.SandboxService/Exec"
-	SandboxService_CopyIn_FullMethodName   = "/qtd.v1.SandboxService/CopyIn"
-	SandboxService_CopyOut_FullMethodName  = "/qtd.v1.SandboxService/CopyOut"
-	SandboxService_Diff_FullMethodName     = "/qtd.v1.SandboxService/Diff"
-	SandboxService_Events_FullMethodName   = "/qtd.v1.SandboxService/Events"
-	SandboxService_Snapshot_FullMethodName = "/qtd.v1.SandboxService/Snapshot"
-	SandboxService_Fork_FullMethodName     = "/qtd.v1.SandboxService/Fork"
-	SandboxService_Destroy_FullMethodName  = "/qtd.v1.SandboxService/Destroy"
-	SandboxService_List_FullMethodName     = "/qtd.v1.SandboxService/List"
+	SandboxService_Create_FullMethodName         = "/qtd.v1.SandboxService/Create"
+	SandboxService_Exec_FullMethodName           = "/qtd.v1.SandboxService/Exec"
+	SandboxService_CopyIn_FullMethodName         = "/qtd.v1.SandboxService/CopyIn"
+	SandboxService_CopyOut_FullMethodName        = "/qtd.v1.SandboxService/CopyOut"
+	SandboxService_Diff_FullMethodName           = "/qtd.v1.SandboxService/Diff"
+	SandboxService_Events_FullMethodName         = "/qtd.v1.SandboxService/Events"
+	SandboxService_Snapshot_FullMethodName       = "/qtd.v1.SandboxService/Snapshot"
+	SandboxService_Fork_FullMethodName           = "/qtd.v1.SandboxService/Fork"
+	SandboxService_Restore_FullMethodName        = "/qtd.v1.SandboxService/Restore"
+	SandboxService_ListSnapshots_FullMethodName  = "/qtd.v1.SandboxService/ListSnapshots"
+	SandboxService_DeleteSnapshot_FullMethodName = "/qtd.v1.SandboxService/DeleteSnapshot"
+	SandboxService_Destroy_FullMethodName        = "/qtd.v1.SandboxService/Destroy"
+	SandboxService_List_FullMethodName           = "/qtd.v1.SandboxService/List"
 )
 
 // SandboxServiceClient is the client API for SandboxService service.
@@ -64,6 +67,12 @@ type SandboxServiceClient interface {
 	Snapshot(ctx context.Context, in *SnapshotRequest, opts ...grpc.CallOption) (*SnapshotResponse, error)
 	// Fork clones a running sandbox into N copies with fresh identities.
 	Fork(ctx context.Context, in *ForkRequest, opts ...grpc.CallOption) (*ForkResponse, error)
+	// Restore starts a new sandbox from a snapshot (fresh identity, its own network link).
+	Restore(ctx context.Context, in *RestoreRequest, opts ...grpc.CallOption) (*RestoreResponse, error)
+	// ListSnapshots lists the stored snapshots.
+	ListSnapshots(ctx context.Context, in *ListSnapshotsRequest, opts ...grpc.CallOption) (*ListSnapshotsResponse, error)
+	// DeleteSnapshot removes a snapshot and its files. Idempotent.
+	DeleteSnapshot(ctx context.Context, in *DeleteSnapshotRequest, opts ...grpc.CallOption) (*DeleteSnapshotResponse, error)
 	// Destroy stops a sandbox and removes everything it left in the data dir. Idempotent.
 	Destroy(ctx context.Context, in *DestroyRequest, opts ...grpc.CallOption) (*DestroyResponse, error)
 	// List returns known sandboxes.
@@ -182,6 +191,36 @@ func (c *sandboxServiceClient) Fork(ctx context.Context, in *ForkRequest, opts .
 	return out, nil
 }
 
+func (c *sandboxServiceClient) Restore(ctx context.Context, in *RestoreRequest, opts ...grpc.CallOption) (*RestoreResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RestoreResponse)
+	err := c.cc.Invoke(ctx, SandboxService_Restore_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sandboxServiceClient) ListSnapshots(ctx context.Context, in *ListSnapshotsRequest, opts ...grpc.CallOption) (*ListSnapshotsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSnapshotsResponse)
+	err := c.cc.Invoke(ctx, SandboxService_ListSnapshots_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sandboxServiceClient) DeleteSnapshot(ctx context.Context, in *DeleteSnapshotRequest, opts ...grpc.CallOption) (*DeleteSnapshotResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteSnapshotResponse)
+	err := c.cc.Invoke(ctx, SandboxService_DeleteSnapshot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *sandboxServiceClient) Destroy(ctx context.Context, in *DestroyRequest, opts ...grpc.CallOption) (*DestroyResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DestroyResponse)
@@ -224,6 +263,12 @@ type SandboxServiceServer interface {
 	Snapshot(context.Context, *SnapshotRequest) (*SnapshotResponse, error)
 	// Fork clones a running sandbox into N copies with fresh identities.
 	Fork(context.Context, *ForkRequest) (*ForkResponse, error)
+	// Restore starts a new sandbox from a snapshot (fresh identity, its own network link).
+	Restore(context.Context, *RestoreRequest) (*RestoreResponse, error)
+	// ListSnapshots lists the stored snapshots.
+	ListSnapshots(context.Context, *ListSnapshotsRequest) (*ListSnapshotsResponse, error)
+	// DeleteSnapshot removes a snapshot and its files. Idempotent.
+	DeleteSnapshot(context.Context, *DeleteSnapshotRequest) (*DeleteSnapshotResponse, error)
 	// Destroy stops a sandbox and removes everything it left in the data dir. Idempotent.
 	Destroy(context.Context, *DestroyRequest) (*DestroyResponse, error)
 	// List returns known sandboxes.
@@ -261,6 +306,15 @@ func (UnimplementedSandboxServiceServer) Snapshot(context.Context, *SnapshotRequ
 }
 func (UnimplementedSandboxServiceServer) Fork(context.Context, *ForkRequest) (*ForkResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Fork not implemented")
+}
+func (UnimplementedSandboxServiceServer) Restore(context.Context, *RestoreRequest) (*RestoreResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Restore not implemented")
+}
+func (UnimplementedSandboxServiceServer) ListSnapshots(context.Context, *ListSnapshotsRequest) (*ListSnapshotsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListSnapshots not implemented")
+}
+func (UnimplementedSandboxServiceServer) DeleteSnapshot(context.Context, *DeleteSnapshotRequest) (*DeleteSnapshotResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteSnapshot not implemented")
 }
 func (UnimplementedSandboxServiceServer) Destroy(context.Context, *DestroyRequest) (*DestroyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Destroy not implemented")
@@ -397,6 +451,60 @@ func _SandboxService_Fork_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SandboxService_Restore_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RestoreRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).Restore(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_Restore_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).Restore(ctx, req.(*RestoreRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SandboxService_ListSnapshots_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSnapshotsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).ListSnapshots(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_ListSnapshots_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).ListSnapshots(ctx, req.(*ListSnapshotsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SandboxService_DeleteSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).DeleteSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_DeleteSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).DeleteSnapshot(ctx, req.(*DeleteSnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SandboxService_Destroy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DestroyRequest)
 	if err := dec(in); err != nil {
@@ -455,6 +563,18 @@ var SandboxService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Fork",
 			Handler:    _SandboxService_Fork_Handler,
+		},
+		{
+			MethodName: "Restore",
+			Handler:    _SandboxService_Restore_Handler,
+		},
+		{
+			MethodName: "ListSnapshots",
+			Handler:    _SandboxService_ListSnapshots_Handler,
+		},
+		{
+			MethodName: "DeleteSnapshot",
+			Handler:    _SandboxService_DeleteSnapshot_Handler,
 		},
 		{
 			MethodName: "Destroy",

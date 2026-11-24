@@ -87,6 +87,18 @@ func handle(conn *os.File, col *collector) {
 		_ = w.JSON(agentproto.FrameResult, agentproto.Result{Version: version.Get().Version, Kernel: kernelRelease()})
 	case agentproto.OpEvents:
 		col.streamEvents(w)
+	case agentproto.OpSync:
+		syscall.Sync()
+		_ = w.JSON(agentproto.FrameResult, agentproto.Result{})
+	case agentproto.OpManifest:
+		col.pause(true) // walking the filesystem is qt's activity, not the sandbox's
+		err := manifest(w)
+		col.pause(false)
+		if err != nil {
+			_ = w.JSON(agentproto.FrameError, agentproto.Error{Message: err.Error()})
+			return
+		}
+		_ = w.JSON(agentproto.FrameResult, agentproto.Result{})
 	case agentproto.OpCopyOut:
 		if err := copyOut(w, req.Path); err != nil {
 			_ = w.JSON(agentproto.FrameError, agentproto.Error{Message: err.Error()})
@@ -294,6 +306,14 @@ func configure(c *agentproto.Configure) error {
 	if c.Net != nil {
 		if err := configureNet(c.Net); err != nil {
 			return fmt.Errorf("configure: %w", err)
+		}
+	}
+	if c.MachineID != "" {
+		if len(c.MachineID) != 32 || strings.Trim(c.MachineID, "0123456789abcdef") != "" {
+			return errors.New("configure: bad machine id")
+		}
+		if err := os.WriteFile("/etc/machine-id", []byte(c.MachineID+"\n"), 0o444); err != nil { //nolint:gosec // G306: world-readable, like every machine-id
+			return fmt.Errorf("configure: machine id: %w", err)
 		}
 	}
 	return nil

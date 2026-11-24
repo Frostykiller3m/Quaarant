@@ -345,6 +345,7 @@ func (s *Service) toProto(ctx context.Context, rec *record) *qtdv1.Sandbox {
 			Pids: uint32(rec.Limits.PIDs), //nolint:gosec // G115: validated positive
 		},
 		Net:          netToProto(rec.Net),
+		ParentId:     rec.ParentID,
 		Capabilities: caps,
 		Labels:       rec.Labels,
 	}

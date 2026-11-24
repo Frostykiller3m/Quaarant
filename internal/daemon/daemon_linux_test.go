@@ -456,10 +456,10 @@ func TestCopyAndDiffRPCs(t *testing.T) {
 		err  error
 		code codes.Code
 	}{
-		{"diff against another sandbox", func() error {
-			_, err := h.client.Diff(ctx, &qtdv1.DiffRequest{SandboxId: sb.GetId(), AgainstSandboxId: sb.GetId()})
+		{"diff against a missing sandbox", func() error {
+			_, err := h.client.Diff(ctx, &qtdv1.DiffRequest{SandboxId: sb.GetId(), AgainstSandboxId: "abcdef012345"})
 			return err
-		}(), codes.Unimplemented},
+		}(), codes.NotFound},
 		{"diff unknown", func() error { _, err := h.client.Diff(ctx, &qtdv1.DiffRequest{SandboxId: "abcdef012345"}); return err }(), codes.NotFound},
 		{"copy out relative path", func() error {
 			s, _ := h.client.CopyOut(ctx, &qtdv1.CopyOutRequest{SandboxId: sb.GetId(), Path: "etc/passwd"})

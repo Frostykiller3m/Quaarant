@@ -327,7 +327,30 @@ var ErrDiffTruncated = errors.New("diff truncated")
 
 // SnapshotOptions controls Snapshot.
 type SnapshotOptions struct {
-	Memory bool // include RAM (CapMemorySnapshot)
+	Memory bool   // include RAM (CapMemorySnapshot)
+	Dir    string // where the backend writes the snapshot (qtd chooses it, under the data dir)
+}
+
+// SnapshotDeleter is implemented by backends whose snapshots hold more than their directory
+// (a thin volume): DeleteSnapshot frees it all.
+type SnapshotDeleter interface {
+	DeleteSnapshot(ctx context.Context, ref SnapshotRef) error
+}
+
+// Entry is one object of a sandbox's filesystem, as a Manifester lists it.
+type Entry struct {
+	Path   string
+	Type   string // f, d, l or o (other)
+	Mode   uint32 // permission bits plus setuid/setgid/sticky
+	Size   int64
+	SHA256 string // regular files (up to a size bound)
+	Link   string // symlinks
+}
+
+// Manifester is implemented by backends that can list a running sandbox's whole filesystem
+// (qt diff A B compares two lists).
+type Manifester interface {
+	Manifest(ctx context.Context, id string) ([]Entry, error)
 }
 
 // SnapshotRef identifies a stored snapshot.

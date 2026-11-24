@@ -137,7 +137,7 @@ func (c chunkSender) Write(p []byte) (int, error) {
 // Diff implements the Diff RPC.
 func (s *Service) Diff(ctx context.Context, req *qtdv1.DiffRequest) (*qtdv1.DiffResponse, error) {
 	if req.GetAgainstSandboxId() != "" {
-		return nil, status.Error(codes.Unimplemented, "diffing two sandboxes arrives in M6 (qt diff a b)")
+		return s.diffSandboxes(ctx, req.GetSandboxId(), req.GetAgainstSandboxId())
 	}
 	_, be, err := s.backendFor(req.GetSandboxId())
 	if err != nil {

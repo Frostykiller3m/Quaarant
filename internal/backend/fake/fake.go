@@ -4,9 +4,15 @@ package fake
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -192,10 +198,20 @@ func (b *Backend) Snapshot(_ context.Context, id string, opts backend.SnapshotOp
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if _, err := b.get(id); err != nil {
+	sb, err := b.get(id)
+	if err != nil {
 		return backend.SnapshotRef{}, err
 	}
-	return backend.SnapshotRef{ID: "snap-" + id, Backend: b.isolation, Memory: opts.Memory}, nil
+	if opts.Dir != "" { // the files copied in so far are the snapshot's state
+		if err := os.MkdirAll(opts.Dir, 0o700); err != nil {
+			return backend.SnapshotRef{}, err
+		}
+		raw, _ := json.Marshal(sb.files)
+		if err := os.WriteFile(filepath.Join(opts.Dir, "fake-files.json"), raw, 0o600); err != nil {
+			return backend.SnapshotRef{}, err
+		}
+	}
+	return backend.SnapshotRef{ID: "snap-" + id, Backend: b.isolation, Memory: opts.Memory, Path: opts.Dir}, nil
 }
 
 // Restore implements backend.Backend.
@@ -206,6 +222,13 @@ func (b *Backend) Restore(ctx context.Context, ref backend.SnapshotRef, spec bac
 	if err := b.Create(ctx, spec); err != nil {
 		return err
 	}
+	if ref.Path != "" {
+		if raw, err := os.ReadFile(filepath.Join(ref.Path, "fake-files.json")); err == nil {
+			b.mu.Lock()
+			_ = json.Unmarshal(raw, &b.sandboxes[spec.ID].files)
+			b.mu.Unlock()
+		}
+	}
 	return b.Start(ctx, spec.ID)
 }
 
@@ -215,7 +238,11 @@ func (b *Backend) Fork(ctx context.Context, id string, children []backend.Spec) 
 		return err
 	}
 	b.mu.Lock()
-	_, err := b.get(id)
+	parent, err := b.get(id)
+	var files map[string][]byte
+	if err == nil {
+		files = maps.Clone(parent.files)
+	}
 	b.mu.Unlock()
 	if err != nil {
 		return err
@@ -224,8 +251,27 @@ func (b *Backend) Fork(ctx context.Context, id string, children []backend.Spec) 
 		if err := b.Restore(ctx, backend.SnapshotRef{Backend: b.isolation}, c); err != nil {
 			return fmt.Errorf("fork %s: %w", c.ID, err)
 		}
+		b.mu.Lock()
+		b.sandboxes[c.ID].files = maps.Clone(files)
+		b.mu.Unlock()
 	}
 	return nil
+}
+
+// Manifest implements backend.Manifester: every CopyIn target is a file.
+func (b *Backend) Manifest(_ context.Context, id string) ([]backend.Entry, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	sb, err := b.get(id)
+	if err != nil {
+		return nil, err
+	}
+	var out []backend.Entry
+	for p, d := range sb.files {
+		sum := sha256.Sum256(d)
+		out = append(out, backend.Entry{Path: p, Type: "f", Mode: 0o644, Size: int64(len(d)), SHA256: hex.EncodeToString(sum[:])})
+	}
+	return out, nil
 }
 
 // Info implements backend.Backend.

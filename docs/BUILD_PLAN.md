@@ -375,9 +375,42 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
 
 ## M6 — Snapshots, fork, and agents
 
-- [ ] **M6-T1 · Snapshot/restore + fork**
+- [x] **M6-T1 · Snapshot/restore + fork**
       Done when: `qt snapshot`, `qt restore`, `qt fork <id> N` work (vm); forked copies get fresh
       MAC/IP/hostname/machine-id/RNG; `qt diff a b` compares files and events.
+
+  Done:
+  - Additive v1 RPCs: `Restore`, `ListSnapshots`, `DeleteSnapshot`, and `DiffResponse.events`
+    (`buf breaking` against main passes).
+  - Backend: `SnapshotOptions.Dir`, `Manifester` and `SnapshotDeleter`. firecracker
+    implements Snapshot (memory or disk), Restore, Fork, Manifest and DeleteSnapshot.
+  - Agent: ops `sync` and `manifest`; `configure` sets the MAC and machine-id.
+  - CLI: `qt snapshot [ls|rm]`, `qt restore`, `qt fork`, `qt diff A B`.
+
+  Proof:
+  - `TestITestSnapshotFork` (real VMs): a memory restore keeps a file and a running
+    background process. Each of 3 fork children has a hostname, MAC, address, machine-id
+    and 16 random bytes different from the parent's and the others'. Children change files
+    independently, the parent keeps running, the fork leaves no snapshot behind, a
+    disk-only restore keeps files but not processes, manifests show a child's new file,
+    and no thin volumes are left.
+  - `TestSnapshotRestoreFork` (daemon, fake backend) covers the RPCs, parent ids, labels,
+    honeytokens, the two-sandbox file and event diff, errors, and that nothing is left.
+  - Run by hand with the installed qtd and CLI.
+
+  Also fixed:
+  - Snapshot and golden memory files are sparsified (2.0 GiB → 61 MiB each).
+  - `make agent-deps` now asks `go list` for `.Standard` instead of guessing from path
+    shapes.
+
+  Follow-ups noted during M6-T1 (not done there):
+  - gvisor has no snapshots or fork (`ErrUnsupported`); `qt diff A B` on gvisor needs a
+    host-side manifest of the merged rootfs.
+  - Snapshot time grows with VM memory (Firecracker writes all of it). Diff snapshots, or
+    UFFD-backed lazy restore, would make fork of a big VM fast.
+  - Open TCP connections don't survive into a child (its address changed). DHCP-less
+    guests are fine; anything caching the old IP is not.
+  - Snapshots are not counted against any quota, and `qt ls` doesn't show parent ids.
 
 - [ ] **M6-T2 · Agent front door**
       Done when: `qt mcp` (an MCP stdio server) and a Python SDK expose create, exec, cp, diff,

@@ -35,6 +35,12 @@ service SandboxService {
   rpc Snapshot(SnapshotRequest) returns (SnapshotResponse);
   // Fork clones a running sandbox into N copies with fresh identities.
   rpc Fork(ForkRequest) returns (ForkResponse);
+  // Restore starts a new sandbox from a snapshot (fresh identity, its own network link).
+  rpc Restore(RestoreRequest) returns (RestoreResponse);
+  // ListSnapshots lists the stored snapshots.
+  rpc ListSnapshots(ListSnapshotsRequest) returns (ListSnapshotsResponse);
+  // DeleteSnapshot removes a snapshot and its files. Idempotent.
+  rpc DeleteSnapshot(DeleteSnapshotRequest) returns (DeleteSnapshotResponse);
   // Destroy stops a sandbox and removes everything it left in the data dir. Idempotent.
   rpc Destroy(DestroyRequest) returns (DestroyResponse);
   // List returns known sandboxes.
@@ -202,6 +208,17 @@ message Change {
 message DiffResponse {
   repeated Change changes = 1;
   bool truncated = 2; // more changes exist than were returned
+  // Set when against_sandbox_id is: what each sandbox did that the other did not.
+  EventsDiff events = 3;
+}
+
+// EventsDiff compares two sandboxes' behaviour. Each entry is one normalized fact, such as
+// "exec /bin/sh -c make", "write /etc/profile" or "connect example.com:443"; text from
+// sandboxed code is untrusted.
+message EventsDiff {
+  repeated string only_in_sandbox = 1;
+  repeated string only_in_against = 2;
+  bool truncated = 3;
 }
 
 message EventsRequest {
@@ -237,6 +254,39 @@ message ForkRequest {
 message ForkResponse {
   repeated Sandbox sandboxes = 1;
 }
+
+message RestoreRequest {
+  string snapshot_id = 1;
+  map<string, string> labels = 2;
+}
+
+message RestoreResponse {
+  Sandbox sandbox = 1;
+}
+
+// SnapshotInfo describes a stored snapshot.
+message SnapshotInfo {
+  string id = 1;
+  string name = 2;
+  string sandbox_id = 3; // the sandbox it was taken from
+  Isolation isolation = 4;
+  bool includes_memory = 5;
+  google.protobuf.Timestamp created_at = 6;
+  uint64 bytes = 7; // on disk (memory and state files; disks are copy-on-write)
+  string image = 8;
+}
+
+message ListSnapshotsRequest {}
+
+message ListSnapshotsResponse {
+  repeated SnapshotInfo snapshots = 1;
+}
+
+message DeleteSnapshotRequest {
+  string snapshot_id = 1;
+}
+
+message DeleteSnapshotResponse {}
 
 message DestroyRequest {
   string sandbox_id = 1;

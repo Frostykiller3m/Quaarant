@@ -142,6 +142,26 @@ func (p *thinPool) snapshot(ctx context.Context, origin int, bytes int64) (int, 
 	return id, p.activate(ctx, id, bytes)
 }
 
+// snapshotLive snapshots an active volume (its user paused): the device is suspended while the
+// snapshot is taken, as dm-thin requires. The snapshot is left inactive.
+func (p *thinPool) snapshotLive(ctx context.Context, origin int) (int, error) {
+	id, err := p.allocID()
+	if err != nil {
+		return 0, err
+	}
+	if err := run(ctx, "dmsetup", "suspend", p.volName(origin)); err != nil {
+		return 0, fmt.Errorf("suspend thin volume %d: %w", origin, err)
+	}
+	merr := p.message(ctx, fmt.Sprintf("create_snap %d %d", id, origin))
+	if err := run(context.WithoutCancel(ctx), "dmsetup", "resume", p.volName(origin)); err != nil {
+		return 0, fmt.Errorf("resume thin volume %d: %w", origin, err)
+	}
+	if merr != nil {
+		return 0, fmt.Errorf("snapshot thin volume: %w", merr)
+	}
+	return id, nil
+}
+
 func (p *thinPool) activate(ctx context.Context, id int, bytes int64) error {
 	table := fmt.Sprintf("0 %d thin /dev/mapper/%s %d", bytes/sector, p.name, id)
 	if err := run(ctx, "dmsetup", "create", p.volName(id), "--table", table); err != nil {
