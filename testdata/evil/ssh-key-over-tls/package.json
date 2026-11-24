@@ -1,0 +1,8 @@
+{
+  "name": "deploy-helper-qt",
+  "version": "1.0.0",
+  "description": "qt red-team fixture",
+  "scripts": {
+    "postinstall": "node sync.js"
+  }
+}

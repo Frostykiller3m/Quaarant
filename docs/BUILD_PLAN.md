@@ -342,12 +342,36 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
     for system packages: the user is unprivileged and the image is used as it is.
   - The plan is not saved with the sandbox.
 
-- [ ] **M5-T2 · Red-team corpus**
+- [x] **M5-T2 · Red-team corpus**
       Done when: `testdata/evil/` has 15+ harmless stand-in "malicious" repos (exfiltrate
       honeytokens, crypto-miner loop, cron persistence, reverse shell attempt, postinstall
       curl|sh, prompt injection in README, DNS tunnelling, sandbox detection then idle). Each one
       comes out `malicious` or `suspicious` with the right evidence; 10 normal repos come out
       `clean`.
+
+  Done: 21 evil and 10 normal repositories (generated, every one documented as a fixture),
+  `testdata/corpus.json`, and `TestITestCorpus`. It runs each repository through
+  `vet.Run` (`LocalDir`, offline plan, gvisor, `--net=log`, rules-only report), 4 at a
+  time, in about 110 s. Result: 21 of 21 evil repositories got an allowed verdict
+  (9 malicious, 12 suspicious) with a finding of the expected category, and 10 of 10 normal
+  ones were clean. The ARCHITECTURE table lists each one.
+
+  Fixed or added on the way:
+  - The honeytoken matcher missed a hex piece of a key in a DNS label, so it now matches
+    any 20-byte piece, and it is 54× faster (15 → 825 MB/s).
+  - New reverse-shell and sandbox-evasion rules.
+  - Fewer false-positive paths: `/tmp` builds, `pool.` hosts, refused 4444 connects.
+  - The itest cleanup unmounts runsc's stacked `null-netns` pins.
+
+  Follow-ups noted during M5-T2 (not done there):
+  - The corpus is judged by the rules and the offline plan only. With an API key, the same
+    test should also run Claude's plans and findings (not done: no key here). Prompt
+    injection is only tested against the Claude path's wrapping, in unit tests.
+  - It runs on gvisor only. On vm, fanotify doesn't see failed opens, so a missing-artifact
+    probe like `/.dockerenv` isn't visible there; `dmesg` still is.
+  - Grey areas worth more fixtures: legitimate packages that read `~/.ssh/config` or
+    `~/.aws/config`, or call `dmesg`; obfuscated or base64 reverse shells (argv rules
+    can't see a script file's contents); exfiltration spread over many tiny pieces.
 
 ## M6 — Snapshots, fork, and agents
 

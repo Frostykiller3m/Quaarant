@@ -175,3 +175,36 @@ func TestMatcher(t *testing.T) {
 		t.Error("nil matcher")
 	}
 }
+
+// A piece of a secret is enough: the first 25 bytes of an API key, hex-encoded in one DNS
+// label, or split over two POST bodies.
+func TestMatcherPartial(t *testing.T) {
+	s, _ := Generate("/tmp")
+	m := NewMatcher(s)
+	env := s.Tokens[2]
+	key := env.Secrets[0] // sk-proj-...
+	label := hex.EncodeToString([]byte(key))[:50]
+	if hits := m.FindName(label + ".t.example.net"); len(hits) != 1 || hits[0].Kind != KindEnv {
+		t.Errorf("hex prefix in DNS: %v", hits)
+	}
+	if hits := m.Find([]byte("part=" + key[10:32])); len(hits) != 1 {
+		t.Errorf("22-byte piece in plaintext: %v", hits)
+	}
+	if hits := m.Find([]byte("part=" + key[10:25])); len(hits) != 0 {
+		t.Errorf("a 15-byte piece is too short to count: %v", hits)
+	}
+	// Random data of the same alphabet does not match.
+	if hits := m.Find(bytes.Repeat([]byte("0123456789abcdef"), 4096)); len(hits) != 0 {
+		t.Errorf("false positive: %v", hits)
+	}
+}
+
+func BenchmarkMatcherFind(b *testing.B) {
+	s, _ := Generate("/tmp")
+	m := NewMatcher(s)
+	data := bytes.Repeat([]byte("GET /simple/six/ HTTP/1.1\r\nHost: pypi.org\r\n\r\n"), 700) // ~32 KiB
+	b.SetBytes(int64(len(data)))
+	for b.Loop() {
+		_ = m.Find(data)
+	}
+}

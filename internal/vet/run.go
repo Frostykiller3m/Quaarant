@@ -1,11 +1,15 @@
 package vet
 
 import (
+	"archive/tar"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -37,6 +41,9 @@ type Options struct {
 	Limits    *qtdv1.Limits
 	Out, Err  io.Writer
 	MaxRepo   int64 // bytes; 0 = 512 MiB
+	// LocalDir, if set, is used instead of cloning Repo (a trusted local checkout, e.g. the
+	// red-team corpus). Everything after the clone is the same.
+	LocalDir string
 }
 
 // Result is a finished vetting run.
@@ -56,11 +63,35 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	}
 	say := func(format string, a ...any) { fmt.Fprintf(o.Err, "qt: "+format+"\n", a...) }
 
-	// 1. Clone, inside a sandbox that may reach only the git host.
+	tmp, err := os.CreateTemp("", "qt-vet-*.tar")
+	if err != nil {
+		return nil, fmt.Errorf("spool: %w", err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()); _ = tmp.Close() }()
+	var sum *Summary
+	var n int64
+	if o.LocalDir != "" {
+		pr, pw := io.Pipe()
+		go func() { _ = pw.CloseWithError(tarDir(o.LocalDir, "repo", pw)) }()
+		cw := &countWriter{w: tmp}
+		if sum, err = Summarize(io.TeeReader(pr, cw), "repo"); err != nil {
+			return nil, err
+		}
+		_, _ = io.Copy(cw, pr)
+		n = cw.n
+	} else if sum, n, err = clone(ctx, o, tmp, say); err != nil {
+		return nil, err
+	}
+	say("repository: %d files (%s archive)", sum.Total, human(n))
+	return o.planAndRun(ctx, sum, tmp, say)
+}
+
+// clone clones o.Repo in a sandbox that may reach only the git host and spools it to w.
+func clone(ctx context.Context, o Options, w io.Writer, say func(string, ...any)) (*Summary, int64, error) {
 	say("cloning %s in a sandbox (network: %s only)", o.Repo.URL, o.Repo.Host)
 	cloneID, err := create(ctx, o.Client, CloneImage, &qtdv1.NetPolicy{Mode: qtdv1.NetPolicy_MODE_ALLOW, AllowDomains: []string{o.Repo.Host}}, false, o.Isolation, map[string]string{"qt.vet": "clone"}, o.Limits)
 	if err != nil {
-		return nil, fmt.Errorf("clone sandbox: %w", err)
+		return nil, 0, fmt.Errorf("clone sandbox: %w", err)
 	}
 	defer func() { _, _ = o.Client.Destroy(context.WithoutCancel(ctx), &qtdv1.DestroyRequest{SandboxId: cloneID}) }()
 	code, err := runIn(ctx, o.Client, cloneID, "/tmp", []string{
@@ -69,25 +100,18 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	},
 		[]string{"GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/bin/false"}, 5*time.Minute, io.Discard, prefixed(o.Err, "  git: "))
 	if err != nil {
-		return nil, fmt.Errorf("clone: %w", err)
+		return nil, 0, fmt.Errorf("clone: %w", err)
 	}
 	if code != 0 {
-		return nil, fmt.Errorf("git clone exited %d", code)
+		return nil, 0, fmt.Errorf("git clone exited %d", code)
 	}
+	// The repository, as a tar stream: summarized for the planner and spooled for the copy.
+	return fetchRepo(ctx, o.Client, cloneID, w, o.MaxRepo)
+}
 
-	// 2. The repository, as a tar stream: summarized for the planner and spooled for the copy.
-	tmp, err := os.CreateTemp("", "qt-vet-*.tar")
-	if err != nil {
-		return nil, fmt.Errorf("spool: %w", err)
-	}
-	defer func() { _ = os.Remove(tmp.Name()); _ = tmp.Close() }()
-	sum, n, err := fetchRepo(ctx, o.Client, cloneID, tmp, o.MaxRepo)
-	if err != nil {
-		return nil, err
-	}
-	say("cloned %d files (%s archive)", sum.Total, human(n))
-
-	// 3. Plan, flag, approve.
+// planAndRun plans, flags, asks, runs and reports.
+func (o Options) planAndRun(ctx context.Context, sum *Summary, tmp *os.File, say func(string, ...any)) (*Result, error) {
+	var err error
 	var plan *Plan
 	if o.Planner != nil {
 		say("asking %s for a plan (the repository is sent to the Claude API as untrusted data)", o.Planner.Name())
@@ -392,4 +416,69 @@ func human(n int64) string {
 		return fmt.Sprintf("%.1f KiB", float64(n)/(1<<10))
 	}
 	return fmt.Sprintf("%d B", n)
+}
+
+type countWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (c *countWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// tarDir writes dir as a tar whose entries start with top/ (regular files, directories and
+// symlinks; nothing else).
+func tarDir(dir, top string, w io.Writer) error {
+	tw := tar.NewWriter(w)
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return err
+		}
+		link := ""
+		switch {
+		case fi.Mode()&fs.ModeSymlink != 0:
+			if link, err = os.Readlink(p); err != nil {
+				return err
+			}
+		case !fi.Mode().IsRegular() && !fi.IsDir():
+			return nil
+		}
+		h, err := tar.FileInfoHeader(fi, link)
+		if err != nil {
+			return err
+		}
+		h.Name = path.Join(top, filepath.ToSlash(rel))
+		if fi.IsDir() {
+			h.Name += "/"
+		}
+		h.Uid, h.Gid, h.Uname, h.Gname = 0, 0, "", ""
+		if err := tw.WriteHeader(h); err != nil {
+			return err
+		}
+		if fi.Mode().IsRegular() {
+			f, err := os.Open(p) //nolint:gosec // G304: the caller's own directory
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(tw, f)
+			_ = f.Close()
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return tw.Close()
 }

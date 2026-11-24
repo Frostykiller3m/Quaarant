@@ -471,6 +471,47 @@ the CLI:
    status is 0 for clean, 2 for suspicious, 3 for malicious, and 1 if the plan was not
    approved. The sandbox is kept for `qt events` and `qt diff`, or removed with `--rm`.
 
+## Red-team corpus (M5-T2)
+
+`testdata/evil/` (21 repositories) and `testdata/normal/` (10) are vetted by
+`TestITestCorpus` through the real flow:
+- a local directory instead of a clone, then the offline plan;
+- a gvisor sandbox with honeytokens and `--net=log`, so attempts reach the proxy and are
+  recorded instead of being blocked before they happen;
+- the rules-only report.
+
+`testdata/corpus.json` gives each evil repository the verdicts it may get and the finding
+categories it must have; normal repositories must be clean. The evil ones are harmless
+stand-ins: what they "steal" is the planted fake data, and every destination is
+`example.com`, `example.net` or a TEST-NET address.
+
+| Behaviour | Repositories | Verdict, finding |
+|---|---|---|
+| Credentials sent out | `exfil-aws-http` (base64 POST), `exfil-dns-npm` (key id in a DNS name), `env-dns-hex` (hex piece of a key in a label), `cookie-stealer` (setup.py, SQLite to a URL), `prompt-injection-readme` | malicious: credential left, credentials read |
+| Credentials read only | `ssh-key-over-tls` (TLS body not inspected), `env-reader-npm` | suspicious: credentials read |
+| Miners | `miner-xmrig` (renamed binary, stratum arguments), `miner-pool-node` (pool name, port 3333) | malicious: miner ran / suspicious: pool traffic |
+| Persistence | `cron-persistence`, `bashrc-persistence`, `authorized-keys`, `git-hook` | suspicious: persistence |
+| Remote access | `revshell-nc`, `revshell-fifo` (npm postinstall), `revshell-python` (setup.py, `pty.spawn`) | malicious: reverse shell |
+| Downloaders | `postinstall-curl-sh`, `dropper-hidden-tmp` | suspicious: downloaded and ran a script / hidden-path binary |
+| Other | `dns-tunnel` (hex labels), `sandbox-detect-idle` (artifacts and `dmesg`, then idles), `metadata-probe` | suspicious: data-like DNS / evasion / metadata |
+
+The normal repositories are clean, with between 8 and 14,477 events each: npm with and
+without dependencies and a build step, pip with requirements, pyproject and a CLI (pytest
+from PyPI), a Go module, shell build and system-inspection scripts, and docs only.
+
+Rules added or tightened for it:
+- reverse shells (`nc -e`, `/dev/tcp`, `socat exec:`, the mkfifo idiom, `pty.spawn`);
+- sandbox and VM probing (container and DMI artifacts, opened or missing, and `dmesg`,
+  `systemd-detect-virt`, `virt-what`; cgroup and cpuinfo reads are not counted);
+- binaries only from hidden paths under `/tmp`, `/var/tmp` and `/dev/shm`, not build outputs
+  such as `/tmp/go-build*` and `node_modules/.bin`;
+- mining pools by operator name, not any `pool.` host;
+- miner ports only for connections the proxy allowed.
+
+The honeytoken matcher now finds any 20-byte piece of a secret, raw or encoded, because
+exfiltration chunks values. It indexes windows by their first 8 bytes behind a 1 Mi-bit
+filter, and scans at about 825 MB/s.
+
 ## Package map
 
 | Package | Purpose | Arrives |

