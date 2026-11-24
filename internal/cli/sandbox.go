@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	qtdv1 "github.com/Frostykiller3m/Quaarant/internal/api/qtd/v1"
+	"github.com/Frostykiller3m/Quaarant/internal/vet"
 )
 
 func newRunCommand(g *globals) *cobra.Command {
@@ -23,9 +24,10 @@ func newRunCommand(g *globals) *cobra.Command {
 		cpus                                      float64
 		pids                                      int
 		rm, interactive, tty, quiet, honeytokens  bool
+		vf                                        vetFlags
 	)
 	cmd := &cobra.Command{
-		Use:   "run [flags] IMAGE [--] [COMMAND [ARG...]]",
+		Use:   "run [flags] IMAGE|GIT-URL [--] [COMMAND [ARG...]]",
 		Short: "Create a sandbox from an image and run a command in it",
 		Long: "run pulls IMAGE, starts a fresh sandbox (gVisor by default, non-root, no network) and runs\n" +
 			"COMMAND in it, exiting with the command's status. The sandbox is kept for inspection\n" +
@@ -34,6 +36,9 @@ func newRunCommand(g *globals) *cobra.Command {
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			img, argv := splitCommand(args)
+			if vet.IsGitURL(img) {
+				return runVet(cmd, g, img, argv, vf, isolation, net, memory, cpus, pids, rm)
+			}
 			if len(argv) == 0 {
 				if !tty {
 					return errors.New("missing COMMAND (qt run IMAGE -- COMMAND...), or use -t for a shell")
@@ -98,6 +103,9 @@ func newRunCommand(g *globals) *cobra.Command {
 	f.StringArrayVar(&labels, "label", nil, "label KEY=VALUE (repeatable)")
 	f.BoolVar(&rm, "rm", false, "remove the sandbox when the command exits")
 	f.BoolVarP(&quiet, "quiet", "q", false, "do not print the sandbox id")
+	f.BoolVarP(&vf.yes, "yes", "y", false, "git URL: run the plan without asking")
+	f.BoolVar(&vf.offline, "offline", false, "git URL: plan from the repository's files and report with rules only (nothing goes to the Claude API)")
+	f.DurationVar(&vf.timeout, "step-timeout", 10*time.Minute, "git URL: time limit for each setup or run command")
 	f.BoolVar(&honeytokens, "honeytokens", true, "plant fake credentials (SSH key, AWS, .env, browser cookies) in $HOME; reading or sending them is an event")
 	return cmd
 }

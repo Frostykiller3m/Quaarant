@@ -431,6 +431,46 @@ never without rules.
     medium suspicious. A refusal, an error or an answer that isn't the schema falls back to
     rules only, with a note.
 
+## Vetting a repository (M5-T1)
+
+`qt run [--yes] [--offline] <git-url> [-- COMMAND]` (`internal/vet`) drives qtd's API from
+the CLI:
+
+1. **Clone in a sandbox.** A throwaway `alpine/git:v2.49.1` sandbox with `--net=allow:<git
+   host>` and no honeytokens runs `git clone --depth 1 --no-tags --single-branch
+   --no-recurse-submodules -- <url> /tmp/repo`. Repository hooks, file protocols and
+   prompts are off. Only `https://` URLs with a domain host are accepted;
+   `git@host:path` becomes https, since a sandbox has no SSH keys. The repository leaves as
+   a tar stream (CopyOut), spooled to a private temporary file. On the host, only tar
+   headers and bounded key files are read; nothing from the repository is unpacked or run
+   there. The clone sandbox is then removed.
+2. **Plan.** With an API key, Claude (`claude-opus-5-5`, structured outputs, refusal
+   fallbacks) proposes an official image, setup and run steps, a network policy and
+   risks. It sees the file list (400 entries at most) and the key files (README,
+   manifests, CI workflows; 24 KiB each, 160 KiB in all), wrapped in `<repository>` as
+   escaped JSON lines and declared untrusted. Without a key, the plan comes from the
+   manifests: npm, pip/pyproject (with pytest when there are tests), Go, Cargo, Bundler,
+   Make, a top-level script, or a listing. The plan is validated: a valid image
+   reference, at most 10 setup and 5 run steps, commands without NUL and at most
+   1000 bytes, and allow-list domains that are names, not addresses.
+3. **Flag.** Rules flag the plan whoever wrote it, so a prompt-injected README can't talk
+   its way past them:
+   - non-official images and full-internet mode;
+   - unknown allow-list domains;
+   - `curl | sh`, decode-and-run, and `sudo`;
+   - persistence writes, setuid bits, `rm -rf /` and raw sockets;
+   - credential paths and unpinned URL installs;
+   - dependency install scripts (a note).
+4. **Approve.** The plan and its flags are printed. The user answers `y` at the terminal;
+   `--yes` approves without asking, and with neither (for example no terminal) nothing
+   runs. `--net` overrides the plan's network policy, and `-- COMMAND` replaces its run
+   steps.
+5. **Run and report.** A fresh sandbox (honeytokens planted, labelled `qt.vet`) receives the
+   repository in `/tmp/repo` and runs each step there with `sh -c` (10 minutes each,
+   `--step-timeout`), streaming output. The `qt report` result prints at the end. The exit
+   status is 0 for clean, 2 for suspicious, 3 for malicious, and 1 if the plan was not
+   approved. The sandbox is kept for `qt events` and `qt diff`, or removed with `--rm`.
+
 ## Package map
 
 | Package | Purpose | Arrives |
@@ -457,7 +497,7 @@ never without rules.
 | `internal/report` | `qt report`: rules, compaction, Claude (structured outputs), evidence validation | M4-T2 |
 | `internal/honeytoken` | per-sandbox fake credentials, SQLite cookie DB, matcher for raw and encoded values | M4-T1 |
 | `internal/report` | compaction, Claude, rules, validator | M4-T2 |
-| `internal/vet` | `qt run <git-url>` flow | M5 |
+| `internal/vet` | `qt run <git-url>`: clone in a sandbox, plan (Claude or manifests), flag, approve, run, report | M5-T1 |
 | `internal/mcp`, `sdk/python` | agent front door | M6-T2 |
 | `internal/remote` | mTLS listener, cert pinning | M7 |
 

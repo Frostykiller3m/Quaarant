@@ -29,6 +29,8 @@ func TestRulesNormalize(t *testing.T) {
 		{Mode: ModeAllow, Allow: []string{"*.example.com"}},
 		{Mode: ModeAllow, Allow: []string{"exa mple.com"}},
 		{Mode: ModeAllow, Allow: []string{"-bad.com"}},
+		{Mode: ModeAllow, Allow: []string{"10.0.0.1"}},
+		{Mode: ModeAllow, Allow: []string{"1.1.1.1"}},
 		{Mode: ModeLog, Allow: []string{"x.com"}},
 		{Mode: 0},
 	} {

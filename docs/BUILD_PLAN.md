@@ -304,10 +304,43 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
 
 ## M5 — Vet a risky repo in one go
 
-- [ ] **M5-T1 · `qt run <git-url>`**
+- [x] **M5-T1 · `qt run <git-url>`**
       Done when: the clone happens inside the sandbox; Claude proposes base image + setup + net
       policy from the repo (untrusted input, escaped); risky commands are flagged; the user
       approves in the terminal; it runs; the report prints at the end.
+
+  Done: `internal/vet`, plus `qt run [--yes] [--offline] [--step-timeout] <git-url>
+  [-- COMMAND]`.
+  - `TestITestVet` uses a real qtd (gvisor, networking) and github.com/octocat/Hello-World:
+    a declined plan leaves no sandbox. An approved one clones in a sandbox allowed to reach
+    github.com only, copies the repository into the run sandbox, and reports suspicious
+    for a command that reads the planted AWS credentials, with the clone sandbox gone
+    afterwards.
+  - Unit tests cover URL parsing (no credentials, ports, queries, addresses or dot
+    segments), summarizing (bounds, `.git` skipped), plan validation, the rule flags on an
+    injected plan (namespaced image, `curl | sh`, `.bashrc`, credential reads, `nc`, log
+    mode), offline plans for six ecosystems, and the Claude planner against a fake API. A
+    README with `</repository>` and "ignore previous instructions" stays inside the
+    wrapper, and what an injected model returns is still flagged.
+  - Run by hand with the installed qtd:
+    - the interactive prompt (`y` through a pty) and exit 2;
+    - no terminal and no `--yes`: nothing runs, exit 1;
+    - `benjaminp/six` offline: pip install from PyPI under the allow-list, then the tests,
+      clean;
+    - `--isolation=vm`.
+
+  Also fixed: `netpol.ParseDomain` accepted IP literals such as `10.0.0.1` as allow-list
+  domains.
+
+  Not verified: Claude's plans on real repositories, which need an API key this machine
+  doesn't have (the offline planner was used for every real run).
+
+  Follow-ups noted during M5-T1 (not done there):
+  - Private repositories (no credentials reach a sandbox by design), git LFS and
+    submodules are not supported.
+  - Steps keep going after a failure, so the code is still exercised. A plan cannot ask
+    for system packages: the user is unprivileged and the image is used as it is.
+  - The plan is not saved with the sandbox.
 
 - [ ] **M5-T2 · Red-team corpus**
       Done when: `testdata/evil/` has 15+ harmless stand-in "malicious" repos (exfiltrate

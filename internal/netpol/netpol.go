@@ -107,6 +107,9 @@ func ParseDomain(s string) (string, error) {
 			return "", fmt.Errorf("domain %.64q: invalid label %.64q", s, l)
 		}
 	}
+	if _, err := netip.ParseAddr(d); err == nil || strings.Trim(labels[len(labels)-1], "0123456789") == "" {
+		return "", fmt.Errorf("domain %.64q: an address, not a name", s)
+	}
 	return d, nil
 }
 
