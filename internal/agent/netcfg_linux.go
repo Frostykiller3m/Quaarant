@@ -4,6 +4,7 @@ package agent
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -19,6 +20,9 @@ const (
 	siocSIFADDR    = 0x8916
 	siocSIFNETMASK = 0x891c
 	siocADDRT      = 0x890b
+	siocDELRT      = 0x890c
+	siocSIFHWADDR  = 0x8924
+	arphrdEther    = 1
 	rtfUp          = 0x1
 	rtfGateway     = 0x2
 )
@@ -38,6 +42,11 @@ func configureNet(n *agentproto.Net) error {
 		return fmt.Errorf("net: %w", err)
 	}
 	defer func() { _ = syscall.Close(fd) }()
+	if n.MAC != "" {
+		if err := setMAC(fd, n.MAC); err != nil {
+			return fmt.Errorf("net: eth0 address: %w", err)
+		}
+	}
 	mask := netip.AddrFrom4(maskOf(pfx.Bits()))
 	for _, step := range []struct {
 		req  uintptr
@@ -62,6 +71,11 @@ func configureNet(n *agentproto.Net) error {
 	putSockaddr(rt[24:40], gw)
 	putSockaddr(rt[40:56], netip.IPv4Unspecified())
 	binary.NativeEndian.PutUint16(rt[56:58], rtfUp|rtfGateway)
+	// A restored VM still has its old default route: replace it.
+	var old [120]byte
+	putSockaddr(old[8:24], netip.IPv4Unspecified())
+	putSockaddr(old[40:56], netip.IPv4Unspecified())
+	_ = ioctl(fd, siocDELRT, unsafe.Pointer(&old[0]))                                                       //nolint:gosec // G103: struct rtentry
 	if err := ioctl(fd, siocADDRT, unsafe.Pointer(&rt[0])); err != nil && !errors.Is(err, syscall.EEXIST) { //nolint:gosec // G103: struct rtentry
 		return fmt.Errorf("net: default route: %w", err)
 	}
@@ -93,4 +107,42 @@ func maskOf(bits int) [4]byte {
 	var m [4]byte
 	binary.BigEndian.PutUint32(m[:], ^uint32(0)<<(32-bits))
 	return m
+}
+
+// setMAC gives eth0 a new hardware address (the link must be down to change it).
+func setMAC(fd int, mac string) error {
+	hw, ok := parseMAC(mac)
+	if !ok || hw[0]&1 != 0 { // unicast only
+		return fmt.Errorf("bad MAC %.32q", mac)
+	}
+	var ifr [40]byte
+	copy(ifr[:], "eth0")
+	*(*uint16)(unsafe.Pointer(&ifr[16])) = 0                                         //nolint:gosec // G103: struct ifreq (down)
+	if err := ioctl(fd, syscall.SIOCSIFFLAGS, unsafe.Pointer(&ifr[0])); err != nil { //nolint:gosec // G103: struct ifreq
+		return err
+	}
+	var hwr [40]byte
+	copy(hwr[:], "eth0")
+	binary.NativeEndian.PutUint16(hwr[16:18], arphrdEther)
+	copy(hwr[18:24], hw[:])
+	return ioctl(fd, siocSIFHWADDR, unsafe.Pointer(&hwr[0])) //nolint:gosec // G103: struct ifreq
+}
+
+// parseMAC reads aa:bb:cc:dd:ee:ff (without the net package: qt-agent stays small).
+func parseMAC(s string) ([6]byte, bool) {
+	var hw [6]byte
+	if len(s) != 17 {
+		return hw, false
+	}
+	for i := range 6 {
+		if i > 0 && s[i*3-1] != ':' {
+			return hw, false
+		}
+		b, err := hex.DecodeString(s[i*3 : i*3+2])
+		if err != nil {
+			return hw, false
+		}
+		hw[i] = b[0]
+	}
+	return hw, true
 }

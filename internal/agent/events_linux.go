@@ -51,6 +51,13 @@ type collector struct {
 	self      map[int]bool
 	parents   map[int]int    // child -> parent (proc connector fork events)
 	execPaths map[int]string // pid -> binary opened for exec (fanotify)
+	paused    bool           // qt is walking the filesystem (manifest): drop file events
+}
+
+func (c *collector) pause(on bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.paused = on
 }
 
 func newCollector() *collector {
@@ -67,6 +74,9 @@ func (c *collector) emit(kind string, v any) {
 	ev := agentproto.Event{Kind: kind, Data: b}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.paused && kind == "file" {
+		return
+	}
 	if c.sub != nil {
 		select {
 		case c.sub <- ev:

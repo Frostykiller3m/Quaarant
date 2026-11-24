@@ -235,19 +235,24 @@ func writeLocalTar(src string, w io.Writer) error {
 func newDiffCommand(g *globals) *cobra.Command {
 	var asJSON, noTrunc bool
 	cmd := &cobra.Command{
-		Use:   "diff SANDBOX",
+		Use:   "diff SANDBOX [OTHER]",
 		Short: "List files a sandbox added, changed or deleted, with sizes and hashes",
 		Long: "diff compares a sandbox's writable layer with its image. KIND is A (added), M (modified)\n" +
-			"or D (deleted). Paths come from the sandbox and are quoted when they hold control\n" +
-			"characters or invalid UTF-8.",
-		Args: cobra.ExactArgs(1),
+			"or D (deleted). With OTHER, it compares two running sandboxes (vm): files in SANDBOX\n" +
+			"relative to OTHER, then what each one did that the other did not. Paths come from the\n" +
+			"sandbox and are quoted when they hold control characters or invalid UTF-8.",
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, closer, err := g.client()
 			if err != nil {
 				return err
 			}
 			defer func() { _ = closer.Close() }()
-			resp, err := c.Diff(cmd.Context(), &qtdv1.DiffRequest{SandboxId: args[0]})
+			req := &qtdv1.DiffRequest{SandboxId: args[0]}
+			if len(args) == 2 {
+				req.AgainstSandboxId = args[1]
+			}
+			resp, err := c.Diff(cmd.Context(), req)
 			if err != nil {
 				return friendly(err, g.socket)
 			}
@@ -269,6 +274,9 @@ func newDiffCommand(g *globals) *cobra.Command {
 				counts[qtdv1.Change_KIND_ADDED], counts[qtdv1.Change_KIND_MODIFIED], counts[qtdv1.Change_KIND_DELETED])
 			if resp.GetTruncated() {
 				fmt.Fprintln(cmd.ErrOrStderr(), "qt: diff truncated: the sandbox has more changes than shown")
+			}
+			if len(args) == 2 && resp.GetEvents() != nil {
+				writeEventsDiff(cmd, args[0], args[1], resp.GetEvents())
 			}
 			return nil
 		},

@@ -227,6 +227,11 @@ func (b *Backend) buildGolden(ctx context.Context, key, dir string, s backend.Sp
 		if err := os.Rename(filepath.Join(root, f), filepath.Join(build, f)); err != nil {
 			return nil, fmt.Errorf("golden: %w", err)
 		}
+		if f == "mem" {
+			if _, err := sparsify(filepath.Join(build, f)); err != nil {
+				b.warn("golden memory file stays fully allocated", err)
+			}
+		}
 		if err := os.Chown(filepath.Join(build, f), 0, 0); err != nil {
 			return nil, fmt.Errorf("golden: %w", err)
 		}
@@ -326,8 +331,11 @@ func (b *Backend) restore(ctx context.Context, bx *box, hostname string) error {
 	}
 	seed := make([]byte, 64)
 	_, _ = rand.Read(seed)
+	// Every restored VM is a new machine: its own hostname, clock, entropy (VMGenID also makes
+	// the kernel reseed), machine-id, MAC and address.
 	req := agentproto.Request{Op: agentproto.OpConfigure, Configure: &agentproto.Configure{
 		Hostname: hostname, UnixNano: time.Now().UnixNano(), Entropy: seed, Net: bx.meta.Net.agent(),
+		MachineID: randHex(16),
 	}}
 	var last error
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {

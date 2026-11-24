@@ -32,7 +32,8 @@ make build && sudo make install   # qt, qtd → /usr/local/bin, qt-agent → /us
 Manual run: `sudo systemctl enable --now qtd`, be in the `quarantine` group (vm isolation also
 needs `make kernel` before `make install`, plus firecracker + jailer on PATH and /dev/kvm), then
 `qt run alpine -- sh -c 'echo hi'` (or `--net=log`, `--net=allow:pypi.org,files.pythonhosted.org`), `qt run https://github.com/owner/repo` (vet a repo), `qt shell <id>`, `qt cp ./dir <id>:/work`, `qt diff <id>`,
-`qt events -f <id>`, `qt report <id>` (Claude with `ANTHROPIC_API_KEY`, else rules), `qt ls`, `qt rm <id>`. Lint with
+`qt events -f <id>`, `qt report <id>` (Claude with `ANTHROPIC_API_KEY`, else rules), `qt snapshot <id>`, `qt restore <snap>`,
+`qt fork <id> N`, `qt diff <a> <b>` (vm), `qt ls`, `qt rm <id>`. Lint with
 `GOOS=windows` too: Windows must keep building.
 
 ## Invariants (security — do not break)

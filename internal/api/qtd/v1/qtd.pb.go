@@ -1358,9 +1358,11 @@ func (x *Change) GetLinkTargetRaw() []byte {
 }
 
 type DiffResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Changes       []*Change              `protobuf:"bytes,1,rep,name=changes,proto3" json:"changes,omitempty"`
-	Truncated     bool                   `protobuf:"varint,2,opt,name=truncated,proto3" json:"truncated,omitempty"` // more changes exist than were returned
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Changes   []*Change              `protobuf:"bytes,1,rep,name=changes,proto3" json:"changes,omitempty"`
+	Truncated bool                   `protobuf:"varint,2,opt,name=truncated,proto3" json:"truncated,omitempty"` // more changes exist than were returned
+	// Set when against_sandbox_id is: what each sandbox did that the other did not.
+	Events        *EventsDiff `protobuf:"bytes,3,opt,name=events,proto3" json:"events,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1409,6 +1411,76 @@ func (x *DiffResponse) GetTruncated() bool {
 	return false
 }
 
+func (x *DiffResponse) GetEvents() *EventsDiff {
+	if x != nil {
+		return x.Events
+	}
+	return nil
+}
+
+// EventsDiff compares two sandboxes' behaviour. Each entry is one normalized fact, such as
+// "exec /bin/sh -c make", "write /etc/profile" or "connect example.com:443"; text from
+// sandboxed code is untrusted.
+type EventsDiff struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OnlyInSandbox []string               `protobuf:"bytes,1,rep,name=only_in_sandbox,json=onlyInSandbox,proto3" json:"only_in_sandbox,omitempty"`
+	OnlyInAgainst []string               `protobuf:"bytes,2,rep,name=only_in_against,json=onlyInAgainst,proto3" json:"only_in_against,omitempty"`
+	Truncated     bool                   `protobuf:"varint,3,opt,name=truncated,proto3" json:"truncated,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EventsDiff) Reset() {
+	*x = EventsDiff{}
+	mi := &file_qtd_v1_qtd_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EventsDiff) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EventsDiff) ProtoMessage() {}
+
+func (x *EventsDiff) ProtoReflect() protoreflect.Message {
+	mi := &file_qtd_v1_qtd_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EventsDiff.ProtoReflect.Descriptor instead.
+func (*EventsDiff) Descriptor() ([]byte, []int) {
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *EventsDiff) GetOnlyInSandbox() []string {
+	if x != nil {
+		return x.OnlyInSandbox
+	}
+	return nil
+}
+
+func (x *EventsDiff) GetOnlyInAgainst() []string {
+	if x != nil {
+		return x.OnlyInAgainst
+	}
+	return nil
+}
+
+func (x *EventsDiff) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
+}
+
 type EventsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SandboxId     string                 `protobuf:"bytes,1,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"`
@@ -1421,7 +1493,7 @@ type EventsRequest struct {
 
 func (x *EventsRequest) Reset() {
 	*x = EventsRequest{}
-	mi := &file_qtd_v1_qtd_proto_msgTypes[15]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1433,7 +1505,7 @@ func (x *EventsRequest) String() string {
 func (*EventsRequest) ProtoMessage() {}
 
 func (x *EventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_qtd_v1_qtd_proto_msgTypes[15]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1446,7 +1518,7 @@ func (x *EventsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventsRequest.ProtoReflect.Descriptor instead.
 func (*EventsRequest) Descriptor() ([]byte, []int) {
-	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{15}
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *EventsRequest) GetSandboxId() string {
@@ -1488,7 +1560,7 @@ type EventsResponse struct {
 
 func (x *EventsResponse) Reset() {
 	*x = EventsResponse{}
-	mi := &file_qtd_v1_qtd_proto_msgTypes[16]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1500,7 +1572,7 @@ func (x *EventsResponse) String() string {
 func (*EventsResponse) ProtoMessage() {}
 
 func (x *EventsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_qtd_v1_qtd_proto_msgTypes[16]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1513,7 +1585,7 @@ func (x *EventsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventsResponse.ProtoReflect.Descriptor instead.
 func (*EventsResponse) Descriptor() ([]byte, []int) {
-	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{16}
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *EventsResponse) GetId() string {
@@ -1548,7 +1620,7 @@ type SnapshotRequest struct {
 
 func (x *SnapshotRequest) Reset() {
 	*x = SnapshotRequest{}
-	mi := &file_qtd_v1_qtd_proto_msgTypes[17]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1560,7 +1632,7 @@ func (x *SnapshotRequest) String() string {
 func (*SnapshotRequest) ProtoMessage() {}
 
 func (x *SnapshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_qtd_v1_qtd_proto_msgTypes[17]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1573,7 +1645,7 @@ func (x *SnapshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SnapshotRequest.ProtoReflect.Descriptor instead.
 func (*SnapshotRequest) Descriptor() ([]byte, []int) {
-	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{17}
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *SnapshotRequest) GetSandboxId() string {
@@ -1607,7 +1679,7 @@ type SnapshotResponse struct {
 
 func (x *SnapshotResponse) Reset() {
 	*x = SnapshotResponse{}
-	mi := &file_qtd_v1_qtd_proto_msgTypes[18]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1619,7 +1691,7 @@ func (x *SnapshotResponse) String() string {
 func (*SnapshotResponse) ProtoMessage() {}
 
 func (x *SnapshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_qtd_v1_qtd_proto_msgTypes[18]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1632,7 +1704,7 @@ func (x *SnapshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SnapshotResponse.ProtoReflect.Descriptor instead.
 func (*SnapshotResponse) Descriptor() ([]byte, []int) {
-	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{18}
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SnapshotResponse) GetSnapshotId() string {
@@ -1660,7 +1732,7 @@ type ForkRequest struct {
 
 func (x *ForkRequest) Reset() {
 	*x = ForkRequest{}
-	mi := &file_qtd_v1_qtd_proto_msgTypes[19]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1672,7 +1744,7 @@ func (x *ForkRequest) String() string {
 func (*ForkRequest) ProtoMessage() {}
 
 func (x *ForkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_qtd_v1_qtd_proto_msgTypes[19]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1685,7 +1757,7 @@ func (x *ForkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForkRequest.ProtoReflect.Descriptor instead.
 func (*ForkRequest) Descriptor() ([]byte, []int) {
-	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{19}
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ForkRequest) GetSandboxId() string {
@@ -1718,7 +1790,7 @@ type ForkResponse struct {
 
 func (x *ForkResponse) Reset() {
 	*x = ForkResponse{}
-	mi := &file_qtd_v1_qtd_proto_msgTypes[20]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1730,7 +1802,7 @@ func (x *ForkResponse) String() string {
 func (*ForkResponse) ProtoMessage() {}
 
 func (x *ForkResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_qtd_v1_qtd_proto_msgTypes[20]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1743,7 +1815,7 @@ func (x *ForkResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForkResponse.ProtoReflect.Descriptor instead.
 func (*ForkResponse) Descriptor() ([]byte, []int) {
-	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{20}
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ForkResponse) GetSandboxes() []*Sandbox {
@@ -1751,6 +1823,363 @@ func (x *ForkResponse) GetSandboxes() []*Sandbox {
 		return x.Sandboxes
 	}
 	return nil
+}
+
+type RestoreRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SnapshotId    string                 `protobuf:"bytes,1,opt,name=snapshot_id,json=snapshotId,proto3" json:"snapshot_id,omitempty"`
+	Labels        map[string]string      `protobuf:"bytes,2,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestoreRequest) Reset() {
+	*x = RestoreRequest{}
+	mi := &file_qtd_v1_qtd_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestoreRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestoreRequest) ProtoMessage() {}
+
+func (x *RestoreRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_qtd_v1_qtd_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestoreRequest.ProtoReflect.Descriptor instead.
+func (*RestoreRequest) Descriptor() ([]byte, []int) {
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *RestoreRequest) GetSnapshotId() string {
+	if x != nil {
+		return x.SnapshotId
+	}
+	return ""
+}
+
+func (x *RestoreRequest) GetLabels() map[string]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
+type RestoreResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Sandbox       *Sandbox               `protobuf:"bytes,1,opt,name=sandbox,proto3" json:"sandbox,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestoreResponse) Reset() {
+	*x = RestoreResponse{}
+	mi := &file_qtd_v1_qtd_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestoreResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestoreResponse) ProtoMessage() {}
+
+func (x *RestoreResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_qtd_v1_qtd_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestoreResponse.ProtoReflect.Descriptor instead.
+func (*RestoreResponse) Descriptor() ([]byte, []int) {
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *RestoreResponse) GetSandbox() *Sandbox {
+	if x != nil {
+		return x.Sandbox
+	}
+	return nil
+}
+
+// SnapshotInfo describes a stored snapshot.
+type SnapshotInfo struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Id             string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name           string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	SandboxId      string                 `protobuf:"bytes,3,opt,name=sandbox_id,json=sandboxId,proto3" json:"sandbox_id,omitempty"` // the sandbox it was taken from
+	Isolation      Isolation              `protobuf:"varint,4,opt,name=isolation,proto3,enum=qtd.v1.Isolation" json:"isolation,omitempty"`
+	IncludesMemory bool                   `protobuf:"varint,5,opt,name=includes_memory,json=includesMemory,proto3" json:"includes_memory,omitempty"`
+	CreatedAt      *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	Bytes          uint64                 `protobuf:"varint,7,opt,name=bytes,proto3" json:"bytes,omitempty"` // on disk (memory and state files; disks are copy-on-write)
+	Image          string                 `protobuf:"bytes,8,opt,name=image,proto3" json:"image,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *SnapshotInfo) Reset() {
+	*x = SnapshotInfo{}
+	mi := &file_qtd_v1_qtd_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SnapshotInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SnapshotInfo) ProtoMessage() {}
+
+func (x *SnapshotInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_qtd_v1_qtd_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SnapshotInfo.ProtoReflect.Descriptor instead.
+func (*SnapshotInfo) Descriptor() ([]byte, []int) {
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *SnapshotInfo) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *SnapshotInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SnapshotInfo) GetSandboxId() string {
+	if x != nil {
+		return x.SandboxId
+	}
+	return ""
+}
+
+func (x *SnapshotInfo) GetIsolation() Isolation {
+	if x != nil {
+		return x.Isolation
+	}
+	return Isolation_ISOLATION_UNSPECIFIED
+}
+
+func (x *SnapshotInfo) GetIncludesMemory() bool {
+	if x != nil {
+		return x.IncludesMemory
+	}
+	return false
+}
+
+func (x *SnapshotInfo) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *SnapshotInfo) GetBytes() uint64 {
+	if x != nil {
+		return x.Bytes
+	}
+	return 0
+}
+
+func (x *SnapshotInfo) GetImage() string {
+	if x != nil {
+		return x.Image
+	}
+	return ""
+}
+
+type ListSnapshotsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListSnapshotsRequest) Reset() {
+	*x = ListSnapshotsRequest{}
+	mi := &file_qtd_v1_qtd_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListSnapshotsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSnapshotsRequest) ProtoMessage() {}
+
+func (x *ListSnapshotsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_qtd_v1_qtd_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSnapshotsRequest.ProtoReflect.Descriptor instead.
+func (*ListSnapshotsRequest) Descriptor() ([]byte, []int) {
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{25}
+}
+
+type ListSnapshotsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Snapshots     []*SnapshotInfo        `protobuf:"bytes,1,rep,name=snapshots,proto3" json:"snapshots,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListSnapshotsResponse) Reset() {
+	*x = ListSnapshotsResponse{}
+	mi := &file_qtd_v1_qtd_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListSnapshotsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSnapshotsResponse) ProtoMessage() {}
+
+func (x *ListSnapshotsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_qtd_v1_qtd_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSnapshotsResponse.ProtoReflect.Descriptor instead.
+func (*ListSnapshotsResponse) Descriptor() ([]byte, []int) {
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ListSnapshotsResponse) GetSnapshots() []*SnapshotInfo {
+	if x != nil {
+		return x.Snapshots
+	}
+	return nil
+}
+
+type DeleteSnapshotRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SnapshotId    string                 `protobuf:"bytes,1,opt,name=snapshot_id,json=snapshotId,proto3" json:"snapshot_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteSnapshotRequest) Reset() {
+	*x = DeleteSnapshotRequest{}
+	mi := &file_qtd_v1_qtd_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteSnapshotRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteSnapshotRequest) ProtoMessage() {}
+
+func (x *DeleteSnapshotRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_qtd_v1_qtd_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteSnapshotRequest.ProtoReflect.Descriptor instead.
+func (*DeleteSnapshotRequest) Descriptor() ([]byte, []int) {
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *DeleteSnapshotRequest) GetSnapshotId() string {
+	if x != nil {
+		return x.SnapshotId
+	}
+	return ""
+}
+
+type DeleteSnapshotResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteSnapshotResponse) Reset() {
+	*x = DeleteSnapshotResponse{}
+	mi := &file_qtd_v1_qtd_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteSnapshotResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteSnapshotResponse) ProtoMessage() {}
+
+func (x *DeleteSnapshotResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_qtd_v1_qtd_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteSnapshotResponse.ProtoReflect.Descriptor instead.
+func (*DeleteSnapshotResponse) Descriptor() ([]byte, []int) {
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{28}
 }
 
 type DestroyRequest struct {
@@ -1762,7 +2191,7 @@ type DestroyRequest struct {
 
 func (x *DestroyRequest) Reset() {
 	*x = DestroyRequest{}
-	mi := &file_qtd_v1_qtd_proto_msgTypes[21]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1774,7 +2203,7 @@ func (x *DestroyRequest) String() string {
 func (*DestroyRequest) ProtoMessage() {}
 
 func (x *DestroyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_qtd_v1_qtd_proto_msgTypes[21]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1787,7 +2216,7 @@ func (x *DestroyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DestroyRequest.ProtoReflect.Descriptor instead.
 func (*DestroyRequest) Descriptor() ([]byte, []int) {
-	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{21}
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *DestroyRequest) GetSandboxId() string {
@@ -1805,7 +2234,7 @@ type DestroyResponse struct {
 
 func (x *DestroyResponse) Reset() {
 	*x = DestroyResponse{}
-	mi := &file_qtd_v1_qtd_proto_msgTypes[22]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1817,7 +2246,7 @@ func (x *DestroyResponse) String() string {
 func (*DestroyResponse) ProtoMessage() {}
 
 func (x *DestroyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_qtd_v1_qtd_proto_msgTypes[22]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1830,7 +2259,7 @@ func (x *DestroyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DestroyResponse.ProtoReflect.Descriptor instead.
 func (*DestroyResponse) Descriptor() ([]byte, []int) {
-	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{22}
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{30}
 }
 
 type ListRequest struct {
@@ -1842,7 +2271,7 @@ type ListRequest struct {
 
 func (x *ListRequest) Reset() {
 	*x = ListRequest{}
-	mi := &file_qtd_v1_qtd_proto_msgTypes[23]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1854,7 +2283,7 @@ func (x *ListRequest) String() string {
 func (*ListRequest) ProtoMessage() {}
 
 func (x *ListRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_qtd_v1_qtd_proto_msgTypes[23]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1867,7 +2296,7 @@ func (x *ListRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRequest.ProtoReflect.Descriptor instead.
 func (*ListRequest) Descriptor() ([]byte, []int) {
-	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{23}
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ListRequest) GetLabelSelector() map[string]string {
@@ -1886,7 +2315,7 @@ type ListResponse struct {
 
 func (x *ListResponse) Reset() {
 	*x = ListResponse{}
-	mi := &file_qtd_v1_qtd_proto_msgTypes[24]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1898,7 +2327,7 @@ func (x *ListResponse) String() string {
 func (*ListResponse) ProtoMessage() {}
 
 func (x *ListResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_qtd_v1_qtd_proto_msgTypes[24]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1911,7 +2340,7 @@ func (x *ListResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListResponse.ProtoReflect.Descriptor instead.
 func (*ListResponse) Descriptor() ([]byte, []int) {
-	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{24}
+	return file_qtd_v1_qtd_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ListResponse) GetSandboxes() []*Sandbox {
@@ -1935,7 +2364,7 @@ type ExecRequest_Start struct {
 
 func (x *ExecRequest_Start) Reset() {
 	*x = ExecRequest_Start{}
-	mi := &file_qtd_v1_qtd_proto_msgTypes[27]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1947,7 +2376,7 @@ func (x *ExecRequest_Start) String() string {
 func (*ExecRequest_Start) ProtoMessage() {}
 
 func (x *ExecRequest_Start) ProtoReflect() protoreflect.Message {
-	mi := &file_qtd_v1_qtd_proto_msgTypes[27]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2015,7 +2444,7 @@ type ExecResponse_Exit struct {
 
 func (x *ExecResponse_Exit) Reset() {
 	*x = ExecResponse_Exit{}
-	mi := &file_qtd_v1_qtd_proto_msgTypes[28]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2027,7 +2456,7 @@ func (x *ExecResponse_Exit) String() string {
 func (*ExecResponse_Exit) ProtoMessage() {}
 
 func (x *ExecResponse_Exit) ProtoReflect() protoreflect.Message {
-	mi := &file_qtd_v1_qtd_proto_msgTypes[28]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2067,7 +2496,7 @@ type CopyInRequest_Header struct {
 
 func (x *CopyInRequest_Header) Reset() {
 	*x = CopyInRequest_Header{}
-	mi := &file_qtd_v1_qtd_proto_msgTypes[29]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2079,7 +2508,7 @@ func (x *CopyInRequest_Header) String() string {
 func (*CopyInRequest_Header) ProtoMessage() {}
 
 func (x *CopyInRequest_Header) ProtoReflect() protoreflect.Message {
-	mi := &file_qtd_v1_qtd_proto_msgTypes[29]
+	mi := &file_qtd_v1_qtd_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2225,10 +2654,16 @@ const file_qtd_v1_qtd_proto_rawDesc = "" +
 	"\n" +
 	"KIND_ADDED\x10\x01\x12\x11\n" +
 	"\rKIND_MODIFIED\x10\x02\x12\x10\n" +
-	"\fKIND_DELETED\x10\x03\"V\n" +
+	"\fKIND_DELETED\x10\x03\"\x82\x01\n" +
 	"\fDiffResponse\x12(\n" +
 	"\achanges\x18\x01 \x03(\v2\x0e.qtd.v1.ChangeR\achanges\x12\x1c\n" +
-	"\ttruncated\x18\x02 \x01(\bR\ttruncated\"\x82\x01\n" +
+	"\ttruncated\x18\x02 \x01(\bR\ttruncated\x12*\n" +
+	"\x06events\x18\x03 \x01(\v2\x12.qtd.v1.EventsDiffR\x06events\"z\n" +
+	"\n" +
+	"EventsDiff\x12&\n" +
+	"\x0fonly_in_sandbox\x18\x01 \x03(\tR\ronlyInSandbox\x12&\n" +
+	"\x0fonly_in_against\x18\x02 \x03(\tR\ronlyInAgainst\x12\x1c\n" +
+	"\ttruncated\x18\x03 \x01(\bR\ttruncated\"\x82\x01\n" +
 	"\rEventsRequest\x12\x1d\n" +
 	"\n" +
 	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\x12\x16\n" +
@@ -2258,7 +2693,34 @@ const file_qtd_v1_qtd_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"=\n" +
 	"\fForkResponse\x12-\n" +
-	"\tsandboxes\x18\x01 \x03(\v2\x0f.qtd.v1.SandboxR\tsandboxes\"/\n" +
+	"\tsandboxes\x18\x01 \x03(\v2\x0f.qtd.v1.SandboxR\tsandboxes\"\xa8\x01\n" +
+	"\x0eRestoreRequest\x12\x1f\n" +
+	"\vsnapshot_id\x18\x01 \x01(\tR\n" +
+	"snapshotId\x12:\n" +
+	"\x06labels\x18\x02 \x03(\v2\".qtd.v1.RestoreRequest.LabelsEntryR\x06labels\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"<\n" +
+	"\x0fRestoreResponse\x12)\n" +
+	"\asandbox\x18\x01 \x01(\v2\x0f.qtd.v1.SandboxR\asandbox\"\x92\x02\n" +
+	"\fSnapshotInfo\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"sandbox_id\x18\x03 \x01(\tR\tsandboxId\x12/\n" +
+	"\tisolation\x18\x04 \x01(\x0e2\x11.qtd.v1.IsolationR\tisolation\x12'\n" +
+	"\x0fincludes_memory\x18\x05 \x01(\bR\x0eincludesMemory\x129\n" +
+	"\n" +
+	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x14\n" +
+	"\x05bytes\x18\a \x01(\x04R\x05bytes\x12\x14\n" +
+	"\x05image\x18\b \x01(\tR\x05image\"\x16\n" +
+	"\x14ListSnapshotsRequest\"K\n" +
+	"\x15ListSnapshotsResponse\x122\n" +
+	"\tsnapshots\x18\x01 \x03(\v2\x14.qtd.v1.SnapshotInfoR\tsnapshots\"8\n" +
+	"\x15DeleteSnapshotRequest\x12\x1f\n" +
+	"\vsnapshot_id\x18\x01 \x01(\tR\n" +
+	"snapshotId\"\x18\n" +
+	"\x16DeleteSnapshotResponse\"/\n" +
 	"\x0eDestroyRequest\x12\x1d\n" +
 	"\n" +
 	"sandbox_id\x18\x01 \x01(\tR\tsandboxId\"\x11\n" +
@@ -2288,7 +2750,7 @@ const file_qtd_v1_qtd_proto_rawDesc = "" +
 	"\x0fCAPABILITY_FORK\x10\x03\x12\x12\n" +
 	"\x0eCAPABILITY_PTY\x10\x04\x12\x1b\n" +
 	"\x17CAPABILITY_GUEST_KERNEL\x10\x05\x12\x1d\n" +
-	"\x19CAPABILITY_SYSCALL_EVENTS\x10\x062\xc8\x04\n" +
+	"\x19CAPABILITY_SYSCALL_EVENTS\x10\x062\xa3\x06\n" +
 	"\x0eSandboxService\x127\n" +
 	"\x06Create\x12\x15.qtd.v1.CreateRequest\x1a\x16.qtd.v1.CreateResponse\x125\n" +
 	"\x04Exec\x12\x13.qtd.v1.ExecRequest\x1a\x14.qtd.v1.ExecResponse(\x010\x01\x129\n" +
@@ -2298,6 +2760,9 @@ const file_qtd_v1_qtd_proto_rawDesc = "" +
 	"\x06Events\x12\x15.qtd.v1.EventsRequest\x1a\x16.qtd.v1.EventsResponse0\x01\x12=\n" +
 	"\bSnapshot\x12\x17.qtd.v1.SnapshotRequest\x1a\x18.qtd.v1.SnapshotResponse\x121\n" +
 	"\x04Fork\x12\x13.qtd.v1.ForkRequest\x1a\x14.qtd.v1.ForkResponse\x12:\n" +
+	"\aRestore\x12\x16.qtd.v1.RestoreRequest\x1a\x17.qtd.v1.RestoreResponse\x12L\n" +
+	"\rListSnapshots\x12\x1c.qtd.v1.ListSnapshotsRequest\x1a\x1d.qtd.v1.ListSnapshotsResponse\x12O\n" +
+	"\x0eDeleteSnapshot\x12\x1d.qtd.v1.DeleteSnapshotRequest\x1a\x1e.qtd.v1.DeleteSnapshotResponse\x12:\n" +
 	"\aDestroy\x12\x16.qtd.v1.DestroyRequest\x1a\x17.qtd.v1.DestroyResponse\x121\n" +
 	"\x04List\x12\x13.qtd.v1.ListRequest\x1a\x14.qtd.v1.ListResponseB>Z<github.com/Frostykiller3m/Quaarant/internal/api/qtd/v1;qtdv1b\x06proto3"
 
@@ -2314,97 +2779,118 @@ func file_qtd_v1_qtd_proto_rawDescGZIP() []byte {
 }
 
 var file_qtd_v1_qtd_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_qtd_v1_qtd_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_qtd_v1_qtd_proto_msgTypes = make([]protoimpl.MessageInfo, 41)
 var file_qtd_v1_qtd_proto_goTypes = []any{
-	(Isolation)(0),                // 0: qtd.v1.Isolation
-	(SandboxState)(0),             // 1: qtd.v1.SandboxState
-	(Capability)(0),               // 2: qtd.v1.Capability
-	(NetPolicy_Mode)(0),           // 3: qtd.v1.NetPolicy.Mode
-	(Change_Kind)(0),              // 4: qtd.v1.Change.Kind
-	(*Limits)(nil),                // 5: qtd.v1.Limits
-	(*NetPolicy)(nil),             // 6: qtd.v1.NetPolicy
-	(*Sandbox)(nil),               // 7: qtd.v1.Sandbox
-	(*CreateRequest)(nil),         // 8: qtd.v1.CreateRequest
-	(*CreateResponse)(nil),        // 9: qtd.v1.CreateResponse
-	(*WindowSize)(nil),            // 10: qtd.v1.WindowSize
-	(*ExecRequest)(nil),           // 11: qtd.v1.ExecRequest
-	(*ExecResponse)(nil),          // 12: qtd.v1.ExecResponse
-	(*CopyInRequest)(nil),         // 13: qtd.v1.CopyInRequest
-	(*CopyInResponse)(nil),        // 14: qtd.v1.CopyInResponse
-	(*CopyOutRequest)(nil),        // 15: qtd.v1.CopyOutRequest
-	(*CopyOutResponse)(nil),       // 16: qtd.v1.CopyOutResponse
-	(*DiffRequest)(nil),           // 17: qtd.v1.DiffRequest
-	(*Change)(nil),                // 18: qtd.v1.Change
-	(*DiffResponse)(nil),          // 19: qtd.v1.DiffResponse
-	(*EventsRequest)(nil),         // 20: qtd.v1.EventsRequest
-	(*EventsResponse)(nil),        // 21: qtd.v1.EventsResponse
-	(*SnapshotRequest)(nil),       // 22: qtd.v1.SnapshotRequest
-	(*SnapshotResponse)(nil),      // 23: qtd.v1.SnapshotResponse
-	(*ForkRequest)(nil),           // 24: qtd.v1.ForkRequest
-	(*ForkResponse)(nil),          // 25: qtd.v1.ForkResponse
-	(*DestroyRequest)(nil),        // 26: qtd.v1.DestroyRequest
-	(*DestroyResponse)(nil),       // 27: qtd.v1.DestroyResponse
-	(*ListRequest)(nil),           // 28: qtd.v1.ListRequest
-	(*ListResponse)(nil),          // 29: qtd.v1.ListResponse
-	nil,                           // 30: qtd.v1.Sandbox.LabelsEntry
-	nil,                           // 31: qtd.v1.CreateRequest.LabelsEntry
-	(*ExecRequest_Start)(nil),     // 32: qtd.v1.ExecRequest.Start
-	(*ExecResponse_Exit)(nil),     // 33: qtd.v1.ExecResponse.Exit
-	(*CopyInRequest_Header)(nil),  // 34: qtd.v1.CopyInRequest.Header
-	nil,                           // 35: qtd.v1.ForkRequest.LabelsEntry
-	nil,                           // 36: qtd.v1.ListRequest.LabelSelectorEntry
-	(*timestamppb.Timestamp)(nil), // 37: google.protobuf.Timestamp
+	(Isolation)(0),                 // 0: qtd.v1.Isolation
+	(SandboxState)(0),              // 1: qtd.v1.SandboxState
+	(Capability)(0),                // 2: qtd.v1.Capability
+	(NetPolicy_Mode)(0),            // 3: qtd.v1.NetPolicy.Mode
+	(Change_Kind)(0),               // 4: qtd.v1.Change.Kind
+	(*Limits)(nil),                 // 5: qtd.v1.Limits
+	(*NetPolicy)(nil),              // 6: qtd.v1.NetPolicy
+	(*Sandbox)(nil),                // 7: qtd.v1.Sandbox
+	(*CreateRequest)(nil),          // 8: qtd.v1.CreateRequest
+	(*CreateResponse)(nil),         // 9: qtd.v1.CreateResponse
+	(*WindowSize)(nil),             // 10: qtd.v1.WindowSize
+	(*ExecRequest)(nil),            // 11: qtd.v1.ExecRequest
+	(*ExecResponse)(nil),           // 12: qtd.v1.ExecResponse
+	(*CopyInRequest)(nil),          // 13: qtd.v1.CopyInRequest
+	(*CopyInResponse)(nil),         // 14: qtd.v1.CopyInResponse
+	(*CopyOutRequest)(nil),         // 15: qtd.v1.CopyOutRequest
+	(*CopyOutResponse)(nil),        // 16: qtd.v1.CopyOutResponse
+	(*DiffRequest)(nil),            // 17: qtd.v1.DiffRequest
+	(*Change)(nil),                 // 18: qtd.v1.Change
+	(*DiffResponse)(nil),           // 19: qtd.v1.DiffResponse
+	(*EventsDiff)(nil),             // 20: qtd.v1.EventsDiff
+	(*EventsRequest)(nil),          // 21: qtd.v1.EventsRequest
+	(*EventsResponse)(nil),         // 22: qtd.v1.EventsResponse
+	(*SnapshotRequest)(nil),        // 23: qtd.v1.SnapshotRequest
+	(*SnapshotResponse)(nil),       // 24: qtd.v1.SnapshotResponse
+	(*ForkRequest)(nil),            // 25: qtd.v1.ForkRequest
+	(*ForkResponse)(nil),           // 26: qtd.v1.ForkResponse
+	(*RestoreRequest)(nil),         // 27: qtd.v1.RestoreRequest
+	(*RestoreResponse)(nil),        // 28: qtd.v1.RestoreResponse
+	(*SnapshotInfo)(nil),           // 29: qtd.v1.SnapshotInfo
+	(*ListSnapshotsRequest)(nil),   // 30: qtd.v1.ListSnapshotsRequest
+	(*ListSnapshotsResponse)(nil),  // 31: qtd.v1.ListSnapshotsResponse
+	(*DeleteSnapshotRequest)(nil),  // 32: qtd.v1.DeleteSnapshotRequest
+	(*DeleteSnapshotResponse)(nil), // 33: qtd.v1.DeleteSnapshotResponse
+	(*DestroyRequest)(nil),         // 34: qtd.v1.DestroyRequest
+	(*DestroyResponse)(nil),        // 35: qtd.v1.DestroyResponse
+	(*ListRequest)(nil),            // 36: qtd.v1.ListRequest
+	(*ListResponse)(nil),           // 37: qtd.v1.ListResponse
+	nil,                            // 38: qtd.v1.Sandbox.LabelsEntry
+	nil,                            // 39: qtd.v1.CreateRequest.LabelsEntry
+	(*ExecRequest_Start)(nil),      // 40: qtd.v1.ExecRequest.Start
+	(*ExecResponse_Exit)(nil),      // 41: qtd.v1.ExecResponse.Exit
+	(*CopyInRequest_Header)(nil),   // 42: qtd.v1.CopyInRequest.Header
+	nil,                            // 43: qtd.v1.ForkRequest.LabelsEntry
+	nil,                            // 44: qtd.v1.RestoreRequest.LabelsEntry
+	nil,                            // 45: qtd.v1.ListRequest.LabelSelectorEntry
+	(*timestamppb.Timestamp)(nil),  // 46: google.protobuf.Timestamp
 }
 var file_qtd_v1_qtd_proto_depIdxs = []int32{
 	3,  // 0: qtd.v1.NetPolicy.mode:type_name -> qtd.v1.NetPolicy.Mode
 	0,  // 1: qtd.v1.Sandbox.isolation:type_name -> qtd.v1.Isolation
 	1,  // 2: qtd.v1.Sandbox.state:type_name -> qtd.v1.SandboxState
-	37, // 3: qtd.v1.Sandbox.created_at:type_name -> google.protobuf.Timestamp
+	46, // 3: qtd.v1.Sandbox.created_at:type_name -> google.protobuf.Timestamp
 	5,  // 4: qtd.v1.Sandbox.limits:type_name -> qtd.v1.Limits
 	6,  // 5: qtd.v1.Sandbox.net:type_name -> qtd.v1.NetPolicy
 	2,  // 6: qtd.v1.Sandbox.capabilities:type_name -> qtd.v1.Capability
-	30, // 7: qtd.v1.Sandbox.labels:type_name -> qtd.v1.Sandbox.LabelsEntry
+	38, // 7: qtd.v1.Sandbox.labels:type_name -> qtd.v1.Sandbox.LabelsEntry
 	0,  // 8: qtd.v1.CreateRequest.isolation:type_name -> qtd.v1.Isolation
 	5,  // 9: qtd.v1.CreateRequest.limits:type_name -> qtd.v1.Limits
 	6,  // 10: qtd.v1.CreateRequest.net:type_name -> qtd.v1.NetPolicy
-	31, // 11: qtd.v1.CreateRequest.labels:type_name -> qtd.v1.CreateRequest.LabelsEntry
+	39, // 11: qtd.v1.CreateRequest.labels:type_name -> qtd.v1.CreateRequest.LabelsEntry
 	7,  // 12: qtd.v1.CreateResponse.sandbox:type_name -> qtd.v1.Sandbox
-	32, // 13: qtd.v1.ExecRequest.start:type_name -> qtd.v1.ExecRequest.Start
+	40, // 13: qtd.v1.ExecRequest.start:type_name -> qtd.v1.ExecRequest.Start
 	10, // 14: qtd.v1.ExecRequest.resize:type_name -> qtd.v1.WindowSize
-	33, // 15: qtd.v1.ExecResponse.exit:type_name -> qtd.v1.ExecResponse.Exit
-	34, // 16: qtd.v1.CopyInRequest.header:type_name -> qtd.v1.CopyInRequest.Header
+	41, // 15: qtd.v1.ExecResponse.exit:type_name -> qtd.v1.ExecResponse.Exit
+	42, // 16: qtd.v1.CopyInRequest.header:type_name -> qtd.v1.CopyInRequest.Header
 	4,  // 17: qtd.v1.Change.kind:type_name -> qtd.v1.Change.Kind
 	18, // 18: qtd.v1.DiffResponse.changes:type_name -> qtd.v1.Change
-	35, // 19: qtd.v1.ForkRequest.labels:type_name -> qtd.v1.ForkRequest.LabelsEntry
-	7,  // 20: qtd.v1.ForkResponse.sandboxes:type_name -> qtd.v1.Sandbox
-	36, // 21: qtd.v1.ListRequest.label_selector:type_name -> qtd.v1.ListRequest.LabelSelectorEntry
-	7,  // 22: qtd.v1.ListResponse.sandboxes:type_name -> qtd.v1.Sandbox
-	10, // 23: qtd.v1.ExecRequest.Start.size:type_name -> qtd.v1.WindowSize
-	8,  // 24: qtd.v1.SandboxService.Create:input_type -> qtd.v1.CreateRequest
-	11, // 25: qtd.v1.SandboxService.Exec:input_type -> qtd.v1.ExecRequest
-	13, // 26: qtd.v1.SandboxService.CopyIn:input_type -> qtd.v1.CopyInRequest
-	15, // 27: qtd.v1.SandboxService.CopyOut:input_type -> qtd.v1.CopyOutRequest
-	17, // 28: qtd.v1.SandboxService.Diff:input_type -> qtd.v1.DiffRequest
-	20, // 29: qtd.v1.SandboxService.Events:input_type -> qtd.v1.EventsRequest
-	22, // 30: qtd.v1.SandboxService.Snapshot:input_type -> qtd.v1.SnapshotRequest
-	24, // 31: qtd.v1.SandboxService.Fork:input_type -> qtd.v1.ForkRequest
-	26, // 32: qtd.v1.SandboxService.Destroy:input_type -> qtd.v1.DestroyRequest
-	28, // 33: qtd.v1.SandboxService.List:input_type -> qtd.v1.ListRequest
-	9,  // 34: qtd.v1.SandboxService.Create:output_type -> qtd.v1.CreateResponse
-	12, // 35: qtd.v1.SandboxService.Exec:output_type -> qtd.v1.ExecResponse
-	14, // 36: qtd.v1.SandboxService.CopyIn:output_type -> qtd.v1.CopyInResponse
-	16, // 37: qtd.v1.SandboxService.CopyOut:output_type -> qtd.v1.CopyOutResponse
-	19, // 38: qtd.v1.SandboxService.Diff:output_type -> qtd.v1.DiffResponse
-	21, // 39: qtd.v1.SandboxService.Events:output_type -> qtd.v1.EventsResponse
-	23, // 40: qtd.v1.SandboxService.Snapshot:output_type -> qtd.v1.SnapshotResponse
-	25, // 41: qtd.v1.SandboxService.Fork:output_type -> qtd.v1.ForkResponse
-	27, // 42: qtd.v1.SandboxService.Destroy:output_type -> qtd.v1.DestroyResponse
-	29, // 43: qtd.v1.SandboxService.List:output_type -> qtd.v1.ListResponse
-	34, // [34:44] is the sub-list for method output_type
-	24, // [24:34] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	20, // 19: qtd.v1.DiffResponse.events:type_name -> qtd.v1.EventsDiff
+	43, // 20: qtd.v1.ForkRequest.labels:type_name -> qtd.v1.ForkRequest.LabelsEntry
+	7,  // 21: qtd.v1.ForkResponse.sandboxes:type_name -> qtd.v1.Sandbox
+	44, // 22: qtd.v1.RestoreRequest.labels:type_name -> qtd.v1.RestoreRequest.LabelsEntry
+	7,  // 23: qtd.v1.RestoreResponse.sandbox:type_name -> qtd.v1.Sandbox
+	0,  // 24: qtd.v1.SnapshotInfo.isolation:type_name -> qtd.v1.Isolation
+	46, // 25: qtd.v1.SnapshotInfo.created_at:type_name -> google.protobuf.Timestamp
+	29, // 26: qtd.v1.ListSnapshotsResponse.snapshots:type_name -> qtd.v1.SnapshotInfo
+	45, // 27: qtd.v1.ListRequest.label_selector:type_name -> qtd.v1.ListRequest.LabelSelectorEntry
+	7,  // 28: qtd.v1.ListResponse.sandboxes:type_name -> qtd.v1.Sandbox
+	10, // 29: qtd.v1.ExecRequest.Start.size:type_name -> qtd.v1.WindowSize
+	8,  // 30: qtd.v1.SandboxService.Create:input_type -> qtd.v1.CreateRequest
+	11, // 31: qtd.v1.SandboxService.Exec:input_type -> qtd.v1.ExecRequest
+	13, // 32: qtd.v1.SandboxService.CopyIn:input_type -> qtd.v1.CopyInRequest
+	15, // 33: qtd.v1.SandboxService.CopyOut:input_type -> qtd.v1.CopyOutRequest
+	17, // 34: qtd.v1.SandboxService.Diff:input_type -> qtd.v1.DiffRequest
+	21, // 35: qtd.v1.SandboxService.Events:input_type -> qtd.v1.EventsRequest
+	23, // 36: qtd.v1.SandboxService.Snapshot:input_type -> qtd.v1.SnapshotRequest
+	25, // 37: qtd.v1.SandboxService.Fork:input_type -> qtd.v1.ForkRequest
+	27, // 38: qtd.v1.SandboxService.Restore:input_type -> qtd.v1.RestoreRequest
+	30, // 39: qtd.v1.SandboxService.ListSnapshots:input_type -> qtd.v1.ListSnapshotsRequest
+	32, // 40: qtd.v1.SandboxService.DeleteSnapshot:input_type -> qtd.v1.DeleteSnapshotRequest
+	34, // 41: qtd.v1.SandboxService.Destroy:input_type -> qtd.v1.DestroyRequest
+	36, // 42: qtd.v1.SandboxService.List:input_type -> qtd.v1.ListRequest
+	9,  // 43: qtd.v1.SandboxService.Create:output_type -> qtd.v1.CreateResponse
+	12, // 44: qtd.v1.SandboxService.Exec:output_type -> qtd.v1.ExecResponse
+	14, // 45: qtd.v1.SandboxService.CopyIn:output_type -> qtd.v1.CopyInResponse
+	16, // 46: qtd.v1.SandboxService.CopyOut:output_type -> qtd.v1.CopyOutResponse
+	19, // 47: qtd.v1.SandboxService.Diff:output_type -> qtd.v1.DiffResponse
+	22, // 48: qtd.v1.SandboxService.Events:output_type -> qtd.v1.EventsResponse
+	24, // 49: qtd.v1.SandboxService.Snapshot:output_type -> qtd.v1.SnapshotResponse
+	26, // 50: qtd.v1.SandboxService.Fork:output_type -> qtd.v1.ForkResponse
+	28, // 51: qtd.v1.SandboxService.Restore:output_type -> qtd.v1.RestoreResponse
+	31, // 52: qtd.v1.SandboxService.ListSnapshots:output_type -> qtd.v1.ListSnapshotsResponse
+	33, // 53: qtd.v1.SandboxService.DeleteSnapshot:output_type -> qtd.v1.DeleteSnapshotResponse
+	35, // 54: qtd.v1.SandboxService.Destroy:output_type -> qtd.v1.DestroyResponse
+	37, // 55: qtd.v1.SandboxService.List:output_type -> qtd.v1.ListResponse
+	43, // [43:56] is the sub-list for method output_type
+	30, // [30:43] is the sub-list for method input_type
+	30, // [30:30] is the sub-list for extension type_name
+	30, // [30:30] is the sub-list for extension extendee
+	0,  // [0:30] is the sub-list for field type_name
 }
 
 func init() { file_qtd_v1_qtd_proto_init() }
@@ -2434,7 +2920,7 @@ func file_qtd_v1_qtd_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_qtd_v1_qtd_proto_rawDesc), len(file_qtd_v1_qtd_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   32,
+			NumMessages:   41,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -86,7 +86,8 @@ type boxMeta struct {
 	CPU      int       `json:"cpu_millis"`
 	Memory   int64     `json:"memory_bytes"`
 	Hostname string    `json:"hostname"`
-	Golden   string    `json:"golden,omitempty"` // restored from this golden snapshot
+	Golden   string    `json:"golden,omitempty"`   // restored from this golden snapshot
+	Snapshot string    `json:"snapshot,omitempty"` // restored from this user snapshot (memory)
 	Disk     diskRef   `json:"disk"`
 	Net      *netMeta  `json:"net,omitempty"` // nil: --net=none (no NIC at all)
 	Created  time.Time `json:"created"`
@@ -97,13 +98,14 @@ type netMeta struct {
 	Tap     string `json:"tap"`
 	Addr    string `json:"addr"`
 	Gateway string `json:"gateway"`
+	MAC     string `json:"mac,omitempty"`
 }
 
 func (n *netMeta) agent() *agentproto.Net {
 	if n == nil {
 		return nil
 	}
-	return &agentproto.Net{Addr: n.Addr, Gateway: n.Gateway}
+	return &agentproto.Net{Addr: n.Addr, Gateway: n.Gateway, MAC: n.MAC}
 }
 
 // guestMAC is every VM's eth0 MAC (locally administered); each VM is alone on its tap.
@@ -143,7 +145,7 @@ func (*Backend) Name() backend.Isolation { return backend.IsolationVM }
 
 // Capabilities implements backend.Backend. Snapshots, fork and events arrive in M2-T2/T3.
 func (*Backend) Capabilities() backend.Capabilities {
-	return backend.CapPTY | backend.CapGuestKernel
+	return backend.CapPTY | backend.CapGuestKernel | backend.CapMemorySnapshot | backend.CapDiskSnapshot | backend.CapFork
 }
 
 func containerID(id string) string { return "qt-" + id }
@@ -182,7 +184,8 @@ func (b *Backend) Create(ctx context.Context, s backend.Spec) (err error) {
 	}
 	bx := &box{id: s.ID, workspace: s.Workspace, meta: boxMeta{Env: s.Env, Workdir: s.Workdir, UID: uid, GID: gid, PIDs: s.Limits.PIDs, CPU: s.Limits.CPUMillis, Memory: s.Limits.MemoryBytes, Hostname: s.Hostname, Created: time.Now().UTC()}, sink: s.Events}
 	if !s.Network.None {
-		bx.meta.Net = &netMeta{Tap: s.Network.TapDevice, Addr: s.Network.Addr.String(), Gateway: s.Network.Gateway.String()}
+		bx.meta.Net = &netMeta{Tap: s.Network.TapDevice, Addr: s.Network.Addr.String(), Gateway: s.Network.Gateway.String(), MAC: newMAC()}
+		s.Network.MAC = bx.meta.Net.MAC
 	}
 	b.boxes[s.ID] = bx
 	b.mu.Unlock()
@@ -264,7 +267,11 @@ func vmConfig(s backend.Spec) ([]byte, error) {
 		"entropy":        map[string]any{},
 	}
 	if s.Network.TapDevice != "" { // no NIC at all with --net=none
-		cfg["network-interfaces"] = []map[string]any{{"iface_id": "eth0", "guest_mac": guestMAC, "host_dev_name": s.Network.TapDevice}}
+		mac := s.Network.MAC
+		if mac == "" {
+			mac = guestMAC
+		}
+		cfg["network-interfaces"] = []map[string]any{{"iface_id": "eth0", "guest_mac": mac, "host_dev_name": s.Network.TapDevice}}
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }
@@ -287,7 +294,7 @@ func (b *Backend) Start(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if bx.meta.Golden != "" {
+	if bx.meta.Golden != "" || bx.meta.Snapshot != "" {
 		if err := b.restore(ctx, bx, bx.meta.Hostname); err != nil {
 			return err
 		}
@@ -563,21 +570,6 @@ func (b *Backend) Destroy(ctx context.Context, id string) error {
 // Diff implements backend.Backend; the vm disk is a live guest filesystem, not inspected from the host yet.
 func (*Backend) Diff(context.Context, string) ([]backend.Change, error) {
 	return nil, fmt.Errorf("firecracker: diff: %w (the disk is a live guest filesystem; not inspectable from the host yet)", errors.ErrUnsupported)
-}
-
-// Snapshot implements backend.Backend.
-func (b *Backend) Snapshot(context.Context, string, backend.SnapshotOptions) (backend.SnapshotRef, error) {
-	return backend.SnapshotRef{}, backend.Require(b, backend.CapDiskSnapshot)
-}
-
-// Restore implements backend.Backend.
-func (b *Backend) Restore(context.Context, backend.SnapshotRef, backend.Spec) error {
-	return backend.Require(b, backend.CapDiskSnapshot)
-}
-
-// Fork implements backend.Backend.
-func (b *Backend) Fork(context.Context, string, []backend.Spec) error {
-	return backend.Require(b, backend.CapFork)
 }
 
 // diskStore opens the copy-on-write disk store once (it may set up the thin pool).

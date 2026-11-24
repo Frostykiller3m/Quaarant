@@ -25,3 +25,8 @@ func (*diskStore) clone(context.Context, diskRef, string, int) (diskRef, error) 
 	return diskRef{}, errLinuxOnly
 }
 func (*diskStore) close(context.Context) error { return nil }
+func (*diskStore) snapshotLive(context.Context, diskRef, string, string) (diskRef, error) {
+	return diskRef{}, errLinuxOnly
+}
+
+func sparsify(string) (int64, error) { return 0, nil }

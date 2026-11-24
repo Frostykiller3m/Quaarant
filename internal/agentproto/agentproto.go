@@ -53,6 +53,7 @@ const (
 	FrameError   FrameType = 20 // JSON Error
 	FrameResult  FrameType = 21 // JSON Result
 	FrameEvent   FrameType = 22 // JSON Event (events stream)
+	FrameEntries FrameType = 23 // JSON []Entry (manifest)
 )
 
 // Ops.
@@ -65,6 +66,10 @@ const (
 	OpConfigure = "configure"
 	// OpEvents subscribes to the agent's exec/file events: a long-lived stream of Event frames.
 	OpEvents = "events"
+	// OpSync flushes the guest's filesystems (before a disk-only snapshot).
+	OpSync = "sync"
+	// OpManifest lists the guest's filesystem: Entries frames, then a Result.
+	OpManifest = "manifest"
 )
 
 // Request starts an operation.
@@ -85,13 +90,32 @@ type Configure struct {
 	UnixNano int64  `json:"unix_nano"` // host wall clock
 	Entropy  []byte `json:"entropy"`   // mixed into /dev/urandom (the kernel also reseeds on VMGenID)
 	Net      *Net   `json:"net,omitempty"`
+	// MachineID, if set, replaces /etc/machine-id (a restored or forked VM's own identity).
+	MachineID string `json:"machine_id,omitempty"`
 }
 
 // Net configures the guest's eth0 (its link to qtd's host-side proxy).
 type Net struct {
-	Addr    string `json:"addr"`    // CIDR, e.g. 10.231.0.6/30
-	Gateway string `json:"gateway"` // e.g. 10.231.0.5
+	Addr    string `json:"addr"`          // CIDR, e.g. 10.231.0.6/30
+	Gateway string `json:"gateway"`       // e.g. 10.231.0.5
+	MAC     string `json:"mac,omitempty"` // a new hardware address for eth0 (restores, forks)
 }
+
+// Entry is one filesystem object in a manifest.
+type Entry struct {
+	Path   string `json:"p"`
+	Type   string `json:"t"` // f (regular), d (directory), l (symlink), o (other)
+	Mode   uint32 `json:"m"` // permission bits and setuid/setgid/sticky
+	Size   int64  `json:"s,omitempty"`
+	SHA256 string `json:"h,omitempty"` // regular files up to MaxHashed
+	Link   string `json:"l,omitempty"`
+}
+
+// Manifest bounds.
+const (
+	MaxEntries = 250_000
+	MaxHashed  = 64 << 20
+)
 
 // Exec describes a process. The agent drops to UID/GID with no capabilities, no_new_privs,
 // RLIMIT_NPROC=NProc and qt's seccomp filter before it runs Argv.

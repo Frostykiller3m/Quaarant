@@ -146,6 +146,33 @@ func (d *diskStore) clone(ctx context.Context, golden diskRef, path string, uid 
 	}
 }
 
+// snapshotLive captures a running VM's disk (the VM is paused): a thin snapshot of its
+// volume (the device suspended for the instant it takes), or a reflink/copy of its file.
+func (d *diskStore) snapshotLive(ctx context.Context, ref diskRef, current, dst string) (diskRef, error) {
+	if ref.Kind == "thin" {
+		id, err := d.pool.snapshotLive(ctx, ref.ThinID)
+		if err != nil {
+			return diskRef{}, err
+		}
+		return diskRef{Kind: "thin", ThinID: id, Bytes: ref.Bytes}, nil
+	}
+	if err := prepareDisk(ctx, current, dst, 0, 0); err != nil {
+		return diskRef{}, err
+	}
+	if err := os.Chmod(dst, 0o400); err != nil {
+		return diskRef{}, fmt.Errorf("snapshot disk: %w", err)
+	}
+	fi, err := os.Stat(dst)
+	if err != nil {
+		return diskRef{}, fmt.Errorf("snapshot disk: %w", err)
+	}
+	kind := ref.Kind
+	if kind == "" {
+		kind = "copy"
+	}
+	return diskRef{Kind: kind, Path: dst, Bytes: fi.Size()}, nil
+}
+
 // remove frees a sandbox's disk (file disks go away with the workspace).
 func (d *diskStore) remove(ctx context.Context, ref diskRef) error {
 	if ref.Kind == "thin" && d.pool != nil {

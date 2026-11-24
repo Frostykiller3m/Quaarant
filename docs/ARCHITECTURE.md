@@ -512,6 +512,45 @@ The honeytoken matcher now finds any 20-byte piece of a secret, raw or encoded, 
 exfiltration chunks values. It indexes windows by their first 8 bytes behind a 1 Mi-bit
 filter, and scans at about 825 MB/s.
 
+## Snapshots, restore and fork (M6-T1, vm)
+
+- **`qt snapshot <id>`** pauses the VM (Firecracker `PATCH /vm Paused`), saves a Full
+  snapshot (`vmstate` and `mem`), and captures the disk copy-on-write. On thin disks the
+  volume is suspended for the instant of `create_snap`; otherwise it is reflinked or
+  copied. The VM then resumes. `--no-memory` syncs the guest first (agent op `sync`) and
+  keeps only the disk.
+  - It lands in `<DataDir>/snapshots/sn-<12 hex>/`: `meta.json` (the backend's),
+    `qt-snapshot.json` (the source sandbox's record) and `honeytokens.json`.
+  - All-zero blocks of the memory file are punched out in the background, so an idle
+    2 GiB VM's snapshot takes about 60 MiB instead of 2 GiB; golden snapshots do the same.
+  - A memory snapshot restores only with the same kernel, agent and firecracker
+    (`Inputs`).
+  - `qt snapshot ls` and `qt snapshot rm` manage them. `qt rm` of the source leaves its
+    snapshots alone.
+- **`qt restore <snapshot>`** makes a new sandbox through the golden-restore path: the
+  memory file is hard-linked and mapped copy-on-write, the disk is a copy-on-write clone,
+  and `network_overrides` points the NIC at the new sandbox's tap. A disk-only snapshot
+  boots its disk cold instead.
+- **`qt fork <id> N`** is one memory snapshot and N restores. The snapshot is removed after;
+  the children keep their hard links and their own disk snapshots. The source keeps
+  running.
+- **A fresh identity for every restored VM**, golden ones included: the agent's `configure`
+  sets a new hostname, IP and default route on the sandbox's own link, a new random
+  locally administered MAC (interface down, `SIOCSIFHWADDR`, up), and a new
+  `/etc/machine-id`, and it writes 64 bytes of host entropy to `/dev/urandom`. VMGenID
+  also makes the kernel reseed. Children share the source's honeytokens (their memory
+  holds them), so those keep working.
+- **`qt diff A B`** compares two running sandboxes. For files, each guest lists its
+  filesystem (agent op `manifest`: path, type, mode, size, SHA-256 up to 64 MiB, link;
+  `/proc`, `/sys`, `/dev`, `/run` and `/.qt` skipped; its own walk is not reported as file
+  events). For behaviour, each event log is reduced to normalized facts (`exec …`,
+  `write …`, `connect host:port`, `refused …`, `dns …`, `honeytoken …`, `denied …`) and
+  the two sets are compared.
+- **Measured** on this WSL machine: with 256 MiB VMs, a snapshot takes 272 ms, a restore
+  128 ms and a fork of 3 576 ms. With 512 MiB, a fork of 3 takes 825 ms. With the default
+  2 GiB, a snapshot takes 4.2 s, a fork of 3 2.6–4.4 s and a restore 106–187 ms. Snapshot
+  time is Firecracker writing guest RAM, so use `--memory` for VMs you intend to fork.
+
 ## Package map
 
 | Package | Purpose | Arrives |

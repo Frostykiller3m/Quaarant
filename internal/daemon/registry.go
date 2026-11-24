@@ -28,7 +28,8 @@ type record struct {
 	Env       []string          `json:"env"`
 	Hostname  string            `json:"hostname"`
 	Labels    map[string]string `json:"labels,omitempty"`
-	Net       *netRecord        `json:"net,omitempty"` // nil: --net=none
+	Net       *netRecord        `json:"net,omitempty"`       // nil: --net=none
+	ParentID  string            `json:"parent_id,omitempty"` // restored or forked from this sandbox
 }
 
 type registry struct {
