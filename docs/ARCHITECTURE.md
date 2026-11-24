@@ -404,11 +404,32 @@ never without rules.
     `honeytoken` event with `egress_dns`, `egress_sni` or `egress_plaintext` and the
     destination. The same sighting within 10 s is recorded once. TLS bodies are not
     inspected.
-- **Report (M4-T2).** The pipeline compacts the events, then asks Claude for findings through a
-  forced tool call with a strict schema. Event data goes to Claude as escaped, untrusted data.
-  A validator drops any finding whose evidence ids are missing or of the wrong kind. Without an
-  API key, a rule-based fallback produces the findings instead. The verdict is one of `clean`,
-  `suspicious` or `malicious`.
+- **Report (M4-T2).** `qt report <id>` (`internal/report`) runs in the CLI, so the API key
+  stays with the user and never reaches qtd. It reads the log over the Events RPC and
+  validates every line again.
+  - **Rules** always run: planted credentials read or sent out, persistence writes (shell
+    start-up files, cron, services, SSH keys, git hooks, `crontab`/`systemctl enable`),
+    miners (binaries, stratum arguments, pool names and ports), metadata probes, allow-list
+    bypass attempts, many refused destinations, data-like DNS names, `curl | sh`, programs
+    run from `/tmp`, and large uploads.
+  - **Claude** runs when `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is set and
+    `--offline` isn't. It reads a compacted log: honeytoken and `policy_denied` events are
+    always kept; execs are ordered as a process tree with repeats counted; file, net and dns
+    repeats are collapsed; system-library opens and missing-file probes are dropped; long
+    runs in one directory become one counted line; the whole is at most 1500 lines and
+    300 KiB. The log goes between `<sandbox_events>` tags as JSON lines with `<`, `>` and `&`
+    escaped, so sandbox text can't close the tag, and the system prompt says it is untrusted
+    data. The model is `claude-opus-5-5` at effort `high`, with server-side refusal fallbacks
+    (`fallbacks: "default"`). It answers through structured outputs (`output_config.format`,
+    a strict JSON schema of verdict, summary and findings, each with title, severity,
+    category, evidence and explanation): the model rejects a forced `tool_choice`, and
+    structured outputs give the same schema guarantee.
+  - **Validation:** a finding is dropped unless every cited id exists in the log and its kind
+    fits the finding's category (a honeytoken event can't prove a miner). Text is stripped of
+    control and format characters and bounded. The verdict is at least what the rules prove,
+    and at most what the surviving findings support: critical means malicious, high or
+    medium suspicious. A refusal, an error or an answer that isn't the schema falls back to
+    rules only, with a note.
 
 ## Package map
 
@@ -433,6 +454,7 @@ never without rules.
 | `internal/cgroups` | the cgroup v2 parent for sandboxes | M2-T1 |
 | `scripts/build-kernel.sh`, `kernel/` | reproducible guest kernel | M2-T1 |
 | `internal/netpol` | sandbox links (netns/veth, tap), nftables, resolver, SNI/Host proxy, nflog refusals | M3 |
+| `internal/report` | `qt report`: rules, compaction, Claude (structured outputs), evidence validation | M4-T2 |
 | `internal/honeytoken` | per-sandbox fake credentials, SQLite cookie DB, matcher for raw and encoded values | M4-T1 |
 | `internal/report` | compaction, Claude, rules, validator | M4-T2 |
 | `internal/vet` | `qt run <git-url>` flow | M5 |
