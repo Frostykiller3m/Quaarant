@@ -39,7 +39,7 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
 
 ## M1 — gVisor backend end to end (works everywhere first)
 
-- [ ] **M1-T1 · Daemon + run/exec/destroy**
+- [x] **M1-T1 · Daemon + run/exec/destroy**
       Done when: `qt run --isolation=gvisor alpine -- sh -c 'echo hi'` prints hi; `qt shell` is
       interactive (PTY); `qt ls` and `qt rm`; each sandbox has cgroup limits (CPU, memory, pids).
 
@@ -50,6 +50,16 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
   limits), and run with runsc. Implement qt run / exec / shell (PTY) / ls / rm. Integration tests
   behind QT_ITEST=1 that actually run runsc.
   ```
+
+  Follow-ups noted during M1-T1 (not done there):
+  - M1-T2: `qt diff` reads `upper/` while the sandbox runs; runsc uses `--file-access=exclusive`
+    (sentry page cache), so check whether diff needs a sync or `--file-access=shared`. Hide
+    qt's own `/.qt/` mountpoint from diffs. `Limits.DiskBytes` is rejected until a disk quota exists.
+  - M1-T3: qtd's `eventLog` writer is minimal (no follow, no runtime monitoring yet).
+  - Sandboxes do not survive a host (or WSL distro) restart: runsc state lives in /run. qtd then
+    shows them as `stopped` and `qt rm` cleans them up (checked by hand). WSL shuts an idle distro
+    down when no terminal is attached; keep one open, or see WSL's idle-timeout settings.
+  - Live terminal resize (SIGWINCH → TIOCSWINSZ) is wired but only the initial size is tested.
 
 - [ ] **M1-T2 · Copy-on-write workspace + diff**
       Done when: `qt cp` in/out works; `qt diff <id>` lists added/changed/deleted files with
