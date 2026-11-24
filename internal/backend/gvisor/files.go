@@ -66,6 +66,13 @@ func (b *Backend) CopyIn(ctx context.Context, id, dir string, r io.Reader) error
 		return err
 	}
 	defer func() { _ = root.Close() }()
+	// qt's own copy is not sandbox activity: keep it out of the event log.
+	b.mu.Lock()
+	obs := bx.obs
+	b.mu.Unlock()
+	if obs != nil {
+		defer obs.suppress(dir)()
+	}
 	uid, gid := int(bx.meta.User.UID), int(bx.meta.User.GID)
 	if rel != "." {
 		if _, err := root.Lstat(rel); errors.Is(err, os.ErrNotExist) {

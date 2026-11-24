@@ -115,6 +115,10 @@ func TestInvalid(t *testing.T) {
 		{"path too long", "file.json", func(m map[string]any) { data(m)["path"] = "/" + strings.Repeat("a", 4096) }},
 		{"empty path", "file.json", func(m map[string]any) { data(m)["path"] = "" }},
 		{"rename without new_path", "file.json", func(m map[string]any) { data(m)["op"] = "rename" }},
+		{"bad errno", "file.json", func(m map[string]any) { data(m)["errno"] = "EACCES; rm -rf /" }},
+		{"lowercase errno", "file.json", func(m map[string]any) { data(m)["errno"] = "eacces" }},
+		{"bad exec sha256", "exec.json", func(m map[string]any) { data(m)["sha256"] = strings.Repeat("A", 64) }},
+		{"short exec sha256", "exec.json", func(m map[string]any) { data(m)["sha256"] = "abc" }},
 		{"bad file flag", "file.json", func(m map[string]any) { data(m)["flags"] = []any{"rm -rf"} }},
 		{"net from guest", "net.json", func(m map[string]any) { m["source"] = "guest" }},
 		{"dns from guest", "dns.json", func(m map[string]any) { m["source"] = "guest" }},
@@ -206,9 +210,9 @@ func TestGoTypesMatchSchema(t *testing.T) {
 		src Source
 		p   Payload
 	}{
-		{SourceHost, Exec{PID: 10, PPID: 1, UID: &uid, Path: "/bin/sh", Argv: []string{"sh", "-c", "id"}, ArgvTruncated: true, Cwd: "/work", ExitCode: &exit}},
-		{SourceGuest, File{Op: "rename", Path: "/a", NewPath: "/b", PID: 10, Flags: []string{"O_WRONLY", "O_CREAT"}, Mode: "0644", Bytes: &n}},
-		{SourceHost, Net{Op: "connect", Proto: "tcp", SrcIP: "10.0.0.2", SrcPort: 4000, DstIP: "2001:db8::1", DstPort: 443, SNI: "pypi.org", HTTPHost: "pypi.org", Allowed: &yes, BytesOut: &n, BytesIn: &n, DurationMS: &n}},
+		{SourceHost, Exec{PID: 10, PPID: 1, UID: &uid, Path: "/bin/sh", Argv: []string{"sh", "-c", "id"}, ArgvTruncated: true, Cwd: "/work", ExitCode: &exit, SHA256: strings.Repeat("ab", 32)}},
+		{SourceGuest, File{Op: "rename", Path: "/a", NewPath: "/b", PID: 10, Flags: []string{"O_WRONLY", "O_CREAT"}, Mode: "0644", Bytes: &n, Errno: "EACCES"}},
+		{SourceHost, Net{Op: "connect", Proto: "tcp", SrcIP: "10.0.0.2", SrcPort: 4000, DstIP: "2001:db8::1", DstPort: 443, SNI: "pypi.org", HTTPHost: "pypi.org", Allowed: &yes, BytesOut: &n, BytesIn: &n, DurationMS: &n, Errno: "ENETUNREACH"}},
 		{SourceHost, DNS{QName: "pypi.org", QType: "AAAA", Allowed: true, RCode: "NOERROR", Answers: []string{"2001:db8::1", "151.101.0.223"}, TTL: &ttl}},
 		{SourceHost, PolicyDenied{Policy: "net", Target: "1.2.3.4:443", Reason: "direct_ip", Rule: "allow:pypi.org"}},
 		{SourceHost, Honeytoken{TokenID: "ht_ssh1", TokenKind: "ssh_key", Trigger: "egress_plaintext", Dst: "1.2.3.4:80", RelatedEvent: NewID()}},

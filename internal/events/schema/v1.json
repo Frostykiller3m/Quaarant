@@ -55,6 +55,7 @@
       "anyOf": [{ "format": "ipv4" }, { "format": "ipv6" }]
     },
     "hostname": { "type": "string", "minLength": 1, "maxLength": 253 },
+    "errno": { "type": "string", "pattern": "^E[A-Z0-9]{1,15}$", "description": "The operation failed with this errno (added in v1.1)." },
 
     "exec": {
       "type": "object",
@@ -68,7 +69,8 @@
         "argv": { "type": "array", "maxItems": 256, "items": { "type": "string", "maxLength": 4096 } },
         "argv_truncated": { "type": "boolean" },
         "cwd": { "$ref": "#/$defs/path" },
-        "exit_code": { "type": "integer", "minimum": -1, "maximum": 255 }
+        "exit_code": { "type": "integer", "minimum": -1, "maximum": 255 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Of the executed binary (added in v1.1)." }
       }
     },
 
@@ -83,7 +85,8 @@
         "pid": { "$ref": "#/$defs/pid" },
         "flags": { "type": "array", "maxItems": 16, "items": { "type": "string", "pattern": "^O_[A-Z_]{1,20}$" } },
         "mode": { "type": "string", "pattern": "^0[0-7]{3,4}$" },
-        "bytes": { "type": "integer", "minimum": 0 }
+        "bytes": { "type": "integer", "minimum": 0 },
+        "errno": { "$ref": "#/$defs/errno" }
       },
       "allOf": [
         { "if": { "properties": { "op": { "enum": ["rename", "symlink"] } } }, "then": { "required": ["new_path"] } }
@@ -106,7 +109,8 @@
         "allowed": { "type": "boolean" },
         "bytes_out": { "type": "integer", "minimum": 0 },
         "bytes_in": { "type": "integer", "minimum": 0 },
-        "duration_ms": { "type": "integer", "minimum": 0 }
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "errno": { "$ref": "#/$defs/errno" }
       }
     },
 

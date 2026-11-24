@@ -55,3 +55,10 @@ func owner(fi fs.FileInfo) (uid, gid uint32) {
 func openNoFollow(r *os.Root, rel string) (*os.File, error) {
 	return r.OpenFile(rel, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 }
+
+func inode(fi fs.FileInfo) uint64 {
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+		return st.Ino
+	}
+	return 0
+}

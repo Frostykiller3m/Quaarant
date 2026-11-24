@@ -486,3 +486,108 @@ func TestCopyAndDiffRPCs(t *testing.T) {
 		}
 	}
 }
+
+func readEvents(t *testing.T, h *harness, req *qtdv1.EventsRequest) ([]*qtdv1.EventsResponse, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	st, err := h.client.Events(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	var out []*qtdv1.EventsResponse
+	for {
+		m, err := st.Recv()
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			return out, err
+		}
+		out = append(out, m)
+	}
+}
+
+func TestEventsRPC(t *testing.T) {
+	h := newHarness(t, 0, nil)
+	sb := h.create(t, &qtdv1.CreateRequest{})
+	id := sb.GetId()
+	for _, cmd := range []string{"id", "uname"} {
+		if r := h.exec(t, start(id, cmd)); r.err != nil {
+			t.Fatal(r.err)
+		}
+	}
+	all, err := readEvents(t, h, &qtdv1.EventsRequest{SandboxId: id})
+	if err != nil || len(all) != 2 || all[0].GetKind() != "exec" {
+		t.Fatalf("events = %v, %v", all, err)
+	}
+	for _, e := range all {
+		if _, err := events.Validate(e.GetEventJson()); err != nil || !strings.Contains(string(e.GetEventJson()), e.GetId()) {
+			t.Errorf("event %s: %v", e.GetEventJson(), err)
+		}
+	}
+	if got, _ := readEvents(t, h, &qtdv1.EventsRequest{SandboxId: id, AfterEventId: all[0].GetId()}); len(got) != 1 || got[0].GetId() != all[1].GetId() {
+		t.Errorf("after first = %v", got)
+	}
+	if got, _ := readEvents(t, h, &qtdv1.EventsRequest{SandboxId: id, Kinds: []string{"net", "dns"}}); len(got) != 0 {
+		t.Errorf("kind filter = %v", got)
+	}
+	for _, bad := range []struct {
+		req  *qtdv1.EventsRequest
+		code codes.Code
+	}{
+		{&qtdv1.EventsRequest{SandboxId: id, Kinds: []string{"syscall"}}, codes.InvalidArgument},
+		{&qtdv1.EventsRequest{SandboxId: id, AfterEventId: "ev_nope"}, codes.NotFound},
+		{&qtdv1.EventsRequest{SandboxId: "../x"}, codes.InvalidArgument},
+		{&qtdv1.EventsRequest{SandboxId: "abcdef012345"}, codes.NotFound},
+	} {
+		if _, err := readEvents(t, h, bad.req); status.Code(err) != bad.code {
+			t.Errorf("%v: %v, want %v", bad.req, err, bad.code)
+		}
+	}
+
+	// Follow: replay, then live events, then the stream ends when the sandbox is removed.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	st, err := h.client.Events(ctx, &qtdv1.EventsRequest{SandboxId: id, Follow: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan string, 10)
+	ended := make(chan error, 1)
+	go func() {
+		for {
+			m, err := st.Recv()
+			if err != nil {
+				ended <- err
+				return
+			}
+			got <- string(m.GetEventJson())
+		}
+	}()
+	for range 2 {
+		<-got
+	}
+	if r := h.exec(t, start(id, "whoami")); r.err != nil {
+		t.Fatal(r.err)
+	}
+	select {
+	case e := <-got:
+		if !strings.Contains(e, `"whoami"`) {
+			t.Errorf("live event = %s", e)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("follow did not deliver a new event")
+	}
+	if _, err := h.client.Destroy(context.Background(), &qtdv1.DestroyRequest{SandboxId: id}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-ended:
+		if !errors.Is(err, io.EOF) {
+			t.Errorf("follow ended with %v, want EOF", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("follow did not end when the sandbox was removed")
+	}
+}

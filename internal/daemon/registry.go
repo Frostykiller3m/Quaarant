@@ -1,9 +1,7 @@
 package daemon
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,7 +11,6 @@ import (
 	"time"
 
 	"github.com/Frostykiller3m/Quaarant/internal/backend"
-	"github.com/Frostykiller3m/Quaarant/internal/events"
 )
 
 var sandboxIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
@@ -107,35 +104,4 @@ func (r *registry) list() []*record {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out
-}
-
-// eventLog appends schema-valid events to sandboxes/<id>/events.jsonl. M1-T3 adds the runtime
-// monitoring feed and followers; for now only backends emit through it.
-type eventLog struct {
-	mu      sync.Mutex
-	path    string
-	sandbox string
-}
-
-func (l *eventLog) Emit(_ context.Context, src events.Source, p events.Payload) error {
-	ev, err := events.New(l.sandbox, src, time.Now().UTC(), p)
-	if err != nil {
-		return fmt.Errorf("build event: %w", err)
-	}
-	line, err := json.Marshal(ev)
-	if err != nil {
-		return fmt.Errorf("encode event: %w", err)
-	}
-	if _, err := events.Validate(line); err != nil {
-		return fmt.Errorf("event fails the schema: %w", err)
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return fmt.Errorf("open event log: %w", err)
-	}
-	_, werr := f.Write(append(line, '\n'))
-	cerr := f.Close()
-	return errors.Join(werr, cerr)
 }

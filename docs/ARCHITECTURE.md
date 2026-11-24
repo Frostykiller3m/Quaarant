@@ -148,6 +148,43 @@ its kind. The kinds are `exec`, `file`, `net`, `dns`, `policy_denied` and `honey
   the migration runs.
 - The gRPC `Events` stream carries the validated JSON bytes unchanged. Only one definition of
   the format exists.
+- Schema v1.1 (additive): `exec.sha256` (of the executed binary) and `errno` on `file` and
+  `net`. Failed attempts are evidence too: a denied read of `/etc/shadow` is an event.
+
+### gvisor event sources (M1-T3)
+
+```
+ sandboxed code ──syscalls──▶ sentry (gVisor kernel) ──seqpacket──▶ qtd monitor ─┐
+                                   │ writes via gofer                             ├─▶ eventLog ─▶ events.jsonl
+                                   ▼                                              │   (validate, rate/size cap)
+                          host overlay upper/ ──inotify──▶ qtd watcher ──────────┘          │
+ qt exec / qt run ─▶ qtd ─▶ runsc exec (qtd records the exec itself) ─────────────┘   Events RPC ─▶ qt events -f
+```
+
+- **Runtime monitoring.** Before `runsc create`, qtd listens on `sandboxes/<id>/monitor.sock`
+  (SOCK_SEQPACKET) and passes `--pod-init-config` with a trace session. runsc connects from
+  outside the sandbox before any sandboxed code runs; qtd accepts that one connection and
+  removes the socket. Points: `sentry/execve` (with binary sha256), `syscall/open|openat|creat`,
+  `syscall/write|writev|pwrite*` (`fd_path`), `syscall/connect`, `syscall/socket` (socket type),
+  `syscall/close` and `sentry/exit_notify_parent` (to flush writes). The wire format and protos
+  are gVisor's (vendored in `third_party/gvisor`, generated into `internal/gvisorpb`).
+- **Source.** These events are `host`. The sentry runs on the host and is not under the
+  sandboxed code's control, although every value in them (paths, argv, addresses) was chosen
+  by that code. They are bounded to schema limits and treated as data.
+- **What the sentry can't name.** runsc has no trace points with paths for unlink, rename,
+  mkdir, symlink or chmod (only raw syscall numbers). Those come from an inotify watcher on the
+  overlay's `upper/`: a whiteout is an unlink, an entry the image has is a copy-up (not
+  reported), anything else is new. They have no pid. Watches go through `os.Root` and
+  `/proc/self/fd`, so a planted symlink can't redirect them, and there are at most 16384 per sandbox.
+- **Shaping.** Opens of directories, `O_PATH` and `/dev/null`/terminals are dropped, and so is
+  qt's own init (pid 1). Writes are summed per process and file and reported on close, on exit,
+  or after 2 s, so an event's time is when it was flushed. A command qtd starts with `runsc exec`
+  has no `execve`, so qtd records it (pid from runsc, `ppid: 0`). `qt cp` suppresses the watcher
+  for its target, so qt's own copies are not sandbox activity.
+- **Limits.** The event log validates every event (about 37 µs each), allows 2000 events/s per
+  sandbox with a burst of 20000, and caps `events.jsonl` at 512 MiB. The sentry retries for up
+  to about 20 ms before it drops an event (so a flood slows the sandbox down), and dropped
+  counts are logged.
 
 ## Network policy (host side)
 
@@ -187,8 +224,10 @@ In every mode, LAN, host, link-local and cloud metadata addresses are unreachabl
 | `internal/doctor` | host capability checks | M0-T2 |
 | `internal/daemon` | qtd server, registry, socket auth | M1-T1 |
 | `internal/image` | OCI pull/unpack, ext4 conversion | M1-T1 / M2-T1 |
-| `internal/backend/gvisor` | runsc backend | M1 |
-| `internal/workspace` | copy-on-write upper dir, diff | M1-T2 |
+| `internal/backend/gvisor` | runsc backend; runtime-monitoring server (M1-T3) | M1 |
+| `internal/gvisorpb`, `third_party/gvisor` | gVisor monitoring protos (vendored) and generated Go | M1-T3 |
+| `internal/agent` | qt-agent code (gvisor init: `qt-agent pause`) | M1-T1 |
+| `internal/workspace` | upper-dir diff, tar out, inotify watcher (M1-T3) | M1-T2 |
 | `internal/backend/firecracker`, `internal/agentproto` | vm backend, vsock protocol | M2 |
 | `internal/netpol` | netns, nftables, resolver, SNI proxy | M3 |
 | `internal/honeytoken` | plant and detect | M4-T1 |

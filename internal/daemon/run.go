@@ -143,7 +143,7 @@ func run(log *slog.Logger, socket, dataDir, group, runsc, runscRoot, agent, cgro
 		if err != nil {
 			return err
 		}
-		b, err := gvisor.New(gvisor.Config{Runsc: path, StateDir: runscRoot, AgentPath: agentPath, CgroupParent: cgroupParent})
+		b, err := gvisor.New(gvisor.Config{Runsc: path, StateDir: runscRoot, AgentPath: agentPath, CgroupParent: cgroupParent, Logger: log})
 		if err != nil {
 			return fmt.Errorf("gvisor backend: %w", err)
 		}

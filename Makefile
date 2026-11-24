@@ -72,14 +72,15 @@ tools: ## Install pinned buf and protoc plugins into GOBIN
 	$(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
 	$(GO) install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
 
-proto: ## Regenerate Go code from proto/
+proto: ## Regenerate Go code from proto/ and the vendored gVisor protos
 	buf generate
+	buf generate --template buf.gen.gvisor.yaml
 
 proto-lint: ## Lint proto files
 	buf lint
 
 proto-check: proto-lint proto ## Fail if generated code is stale
-	git diff --exit-code -- internal/api
+	git diff --exit-code -- internal/api internal/gvisorpb
 
 agent-deps: ## qt-agent may only use the standard library and internal packages
 	@bad=$$(GOOS=linux $(GO) list -deps ./cmd/qt-agent | grep '\.' | grep -v '^$(MODULE)/'); \

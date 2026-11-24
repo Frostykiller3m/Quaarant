@@ -1,0 +1,13 @@
+version: v2
+# Generates internal/gvisorpb from the vendored gVisor protos (one Go package, as in gVisor).
+managed:
+  enabled: true
+  override:
+    - file_option: go_package
+      value: github.com/Frostykiller3m/Quaarant/internal/gvisorpb;gvisorpb
+inputs:
+  - directory: third_party/gvisor
+plugins:
+  - local: protoc-gen-go
+    out: .
+    opt: module=github.com/Frostykiller3m/Quaarant
