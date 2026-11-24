@@ -89,7 +89,7 @@ func newRunCommand(g *globals) *cobra.Command {
 	addExecFlags(cmd, &interactive, &tty, &env, &workdir)
 	f := cmd.Flags()
 	f.StringVar(&isolation, "isolation", "gvisor", "isolation level: gvisor or vm")
-	f.StringVar(&net, "net", "none", "network policy (only none until M3)")
+	f.StringVar(&net, "net", "none", "network: none, log (everything public, all recorded) or allow:DOMAIN[,DOMAIN...] (those names and their subdomains only)")
 	f.StringVar(&hostname, "hostname", "", "sandbox hostname (default qt-<id>)")
 	f.Float64Var(&cpus, "cpus", 0, "CPU limit in cores, e.g. 1.5 (default 2)")
 	f.StringVar(&memory, "memory", "", "memory limit, e.g. 512m or 2g (default 2g)")
@@ -110,10 +110,11 @@ func createRequest(img, isolation, net, hostname, memory string, cpus float64, p
 	default:
 		return nil, fmt.Errorf("--isolation must be gvisor or vm, not %q", isolation)
 	}
-	if net != "none" {
-		return nil, fmt.Errorf("--net=%s: only --net=none exists until M3", net)
+	np, err := parseNet(net)
+	if err != nil {
+		return nil, err
 	}
-	req.Net = &qtdv1.NetPolicy{Mode: qtdv1.NetPolicy_MODE_NONE}
+	req.Net = np
 	if cpus < 0 || cpus > 1024 || math.IsNaN(cpus) {
 		return nil, fmt.Errorf("--cpus %v out of range", cpus)
 	}
@@ -349,4 +350,26 @@ func ago(t time.Time) string {
 		return fmt.Sprintf("%dh ago", int(d.Hours()))
 	}
 	return t.Local().Format("2006-01-02")
+}
+
+// parseNet reads --net: none, log, or allow:a.com,b.org (qtd validates the names again).
+func parseNet(s string) (*qtdv1.NetPolicy, error) {
+	switch {
+	case s == "none":
+		return &qtdv1.NetPolicy{Mode: qtdv1.NetPolicy_MODE_NONE}, nil
+	case s == "log":
+		return &qtdv1.NetPolicy{Mode: qtdv1.NetPolicy_MODE_LOG}, nil
+	case strings.HasPrefix(s, "allow:"):
+		var ds []string
+		for _, d := range strings.Split(strings.TrimPrefix(s, "allow:"), ",") {
+			if d = strings.TrimSpace(d); d != "" {
+				ds = append(ds, d)
+			}
+		}
+		if len(ds) == 0 {
+			return nil, errors.New("--net=allow: needs at least one domain, e.g. --net=allow:pypi.org,files.pythonhosted.org")
+		}
+		return &qtdv1.NetPolicy{Mode: qtdv1.NetPolicy_MODE_ALLOW, AllowDomains: ds}, nil
+	}
+	return nil, fmt.Errorf("--net=%s: want none, log or allow:DOMAIN[,DOMAIN...]", s)
 }

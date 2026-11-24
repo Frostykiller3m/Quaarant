@@ -244,3 +244,62 @@ func hostResolvers() ([]netip.AddrPort, error) {
 	}
 	return out, nil
 }
+
+// parseAAnswers extracts the A records and the smallest TTL (A and CNAME) of a response.
+func parseAAnswers(raw []byte, id uint16) ([]netip.Addr, uint32, dnsmessage.RCode, bool, error) {
+	var ps dnsmessage.Parser
+	h, err := ps.Start(raw)
+	if err != nil {
+		return nil, 0, 0, false, err
+	}
+	if h.ID != id || !h.Response {
+		return nil, 0, 0, false, errors.New("dns: not our answer")
+	}
+	if err := ps.SkipAllQuestions(); err != nil {
+		return nil, 0, 0, false, err
+	}
+	var ips []netip.Addr
+	ttl := uint32(maxLearn / time.Second)
+	for {
+		rh, err := ps.AnswerHeader()
+		if errors.Is(err, dnsmessage.ErrSectionDone) {
+			break
+		}
+		if err != nil {
+			return nil, 0, 0, false, err
+		}
+		switch rh.Type {
+		case dnsmessage.TypeA:
+			a, err := ps.AResource()
+			if err != nil {
+				return nil, 0, 0, false, err
+			}
+			ips = append(ips, netip.AddrFrom4(a.A))
+			ttl = min(ttl, rh.TTL)
+		case dnsmessage.TypeCNAME:
+			ttl = min(ttl, rh.TTL)
+			if err := ps.SkipAnswer(); err != nil {
+				return nil, 0, 0, false, err
+			}
+		default:
+			if err := ps.SkipAnswer(); err != nil {
+				return nil, 0, 0, false, err
+			}
+		}
+	}
+	if len(ips) == 0 {
+		ttl = 0
+	}
+	return ips, ttl, h.RCode, h.Truncated, nil
+}
+
+func buildQuery(id uint16, name dnsmessage.Name) ([]byte, error) {
+	b := dnsmessage.NewBuilder(make([]byte, 0, 512), dnsmessage.Header{ID: id, RecursionDesired: true})
+	if err := b.StartQuestions(); err != nil {
+		return nil, err
+	}
+	if err := b.Question(dnsmessage.Question{Name: name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET}); err != nil {
+		return nil, err
+	}
+	return b.Finish()
+}

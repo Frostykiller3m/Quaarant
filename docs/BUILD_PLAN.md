@@ -194,9 +194,34 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
     connections; `qt doctor` should detect that. The proxy dials from the host's namespace,
     so host routes (for example a VPN) apply to sandbox traffic.
 
-- [ ] **M3-T2 · Allow-list + log**
+- [x] **M3-T2 · Allow-list + log**
       Done when: `--net=allow:pypi.org` lets pip install work and nothing else (test); DNS and
       SNI are logged as events; `--net=log` records every connection; denials are events.
+
+  Done: the per-sandbox resolver, the SNI/Host proxy policy, nflog for kernel refusals, and
+  qtd wiring (attach, rm, adoption after a restart, pruning). `TestITestDaemonNetwork` goes
+  through qtd's socket. With `--net=allow:pypi.org,files.pythonhosted.org`, `pip install
+  six` works. Refused, each with an event: other names, a direct IP, DNS-over-HTTPS, SNI
+  fronting on a PyPI address, metadata, and UDP. With `--net=log`, the internet works and
+  every connection is recorded (SNI, bytes, duration). `rm` leaves no link. The netpol
+  itests also cover HTTP Host fronting, DNS to 8.8.8.8 being captured, and adoption.
+  Checked by hand with the installed qtd as well, including a `qtd` restart under a live
+  sandbox and a VM with `--net=allow`.
+
+  One "Done when" detail can't hold as written: `--net=allow:pypi.org` alone can't make pip
+  work, because pip downloads packages from `files.pythonhosted.org`. pip fails with a
+  "can't connect to files.pythonhosted.org" hint, and the refusal is an event. The test
+  allows both names. The plan's nftables IP sets became the proxy's in-memory set
+  (ARCHITECTURE explains why).
+
+  Follow-ups noted during M3-T2 (not done there):
+  - The kernel-refusal log limit (100/s, burst 200) is per host, not per sandbox: a noisy
+    sandbox can crowd out another's refusal events. Use an nftables meter keyed by iifname.
+  - In allow mode, only TLS (with SNI) and HTTP get through. SSH, git://, SMTP and similar
+    need a rule type of their own (host:port allow entries). QUIC falls back to TCP.
+  - `qt ls` does not show a sandbox's network policy (the API returns it).
+  - Allow-list presets (for example `pypi` = pypi.org + files.pythonhosted.org) would save
+    users from the pip surprise above.
 
   ```text
   Implement host-side egress control: a per-sandbox DNS resolver that answers only for allowed

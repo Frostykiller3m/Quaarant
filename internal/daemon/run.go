@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -24,6 +25,7 @@ import (
 	"github.com/Frostykiller3m/Quaarant/internal/backend/firecracker"
 	"github.com/Frostykiller3m/Quaarant/internal/backend/gvisor"
 	"github.com/Frostykiller3m/Quaarant/internal/image"
+	"github.com/Frostykiller3m/Quaarant/internal/netpol"
 	"github.com/Frostykiller3m/Quaarant/internal/version"
 )
 
@@ -115,6 +117,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		jailer       = fl.String("jailer", "jailer", "firecracker jailer binary")
 		vmKernel     = fl.String("vm-kernel", "/usr/local/lib/quarantine/vmlinux", "guest kernel for vm isolation (scripts/build-kernel.sh)")
 		fcState      = fl.String("vm-state", "/run/quarantine/fc", "vm backend state directory")
+		netPool      = fl.String("net-pool", netpol.DefaultPool.String(), "IPv4 range for sandbox links (/30 each; must not overlap a host route)")
 		debug        = fl.Bool("debug", false, "debug logging")
 	)
 	if err := fl.Parse(args); err != nil {
@@ -132,6 +135,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	cfg := runConfig{
 		socket: *socket, dataDir: *dataDir, group: *group, runsc: *runsc, runscRoot: *runscRoot, agent: *agent,
 		cgroupParent: *cgroupParent, firecracker: *fc, jailer: *jailer, vmKernel: *vmKernel, fcState: *fcState,
+		netPool: *netPool,
 	}
 	if err := run(log, cfg); err != nil {
 		log.Error("qtd failed", "err", err)
@@ -142,7 +146,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 
 type runConfig struct {
 	socket, dataDir, group, runsc, runscRoot, agent, cgroupParent string
-	firecracker, jailer, vmKernel, fcState                        string
+	firecracker, jailer, vmKernel, fcState, netPool               string
 }
 
 func run(log *slog.Logger, c runConfig) error {
@@ -171,8 +175,15 @@ func run(log *slog.Logger, c runConfig) error {
 	} else {
 		log.Warn("vm isolation unavailable", "reason", why)
 	}
+	nm, err := netManager(c, log)
+	if err != nil {
+		return err
+	}
+	if nm != nil {
+		defer nm.Release() // sandboxes keep their links; the next qtd adopts them
+	}
 	svc, err := New(Options{
-		DataDir: dataDir, Backends: backends, Images: image.NewStore(filepath.Join(dataDir, "images")), Logger: log,
+		DataDir: dataDir, Backends: backends, Images: image.NewStore(filepath.Join(dataDir, "images")), Net: nm, Logger: log,
 	})
 	if err != nil {
 		return err
@@ -237,4 +248,22 @@ func vmBackend(c runConfig, agentPath string, log *slog.Logger) (backend.Backend
 		return nil, err.Error()
 	}
 	return b, ""
+}
+
+// netManager sets up sandbox networking (--net=log, --net=allow:...). Without iproute2 or
+// nftables qtd still runs, with --net=none only.
+func netManager(c runConfig, log *slog.Logger) (*netpol.Manager, error) {
+	pool, err := netip.ParsePrefix(c.netPool)
+	if err != nil {
+		return nil, fmt.Errorf("--net-pool: %w", err)
+	}
+	m, err := netpol.New(context.Background(), netpol.Config{
+		Tag: netpol.DefaultTag, Pool: pool, ProxyPort: netpol.DefaultProxyPort, DNSPort: netpol.DefaultDNSPort, Logger: log,
+	})
+	if err != nil {
+		log.Warn("sandbox networking unavailable: only --net=none", "err", err)
+		return nil, nil //nolint:nilerr // degraded, not fatal: logged above
+	}
+	log.Info("sandbox networking ready", "pool", pool)
+	return m, nil
 }

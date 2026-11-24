@@ -28,7 +28,7 @@ func attachWithDNS(t *testing.T, m *Manager, id string, rules Rules, rec *record
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	if err := os.WriteFile(filepath.Join(dir, "resolv.conf"), []byte("nameserver "+l.Gateway.String()+"\n"), 0o644); err != nil { //nolint:gosec // G306: test resolv.conf
+	if err := os.WriteFile(filepath.Join(dir, "resolv.conf"), []byte("nameserver "+l.Gateway.String()+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return l

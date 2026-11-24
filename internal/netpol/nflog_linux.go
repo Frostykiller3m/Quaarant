@@ -62,7 +62,7 @@ func openNflog(group uint16) (*nflog, error) {
 		{nfulaCfgQthresh, binary.BigEndian.AppendUint32(nil, 1)}, // deliver each refusal at once
 		{nfulaCfgTimeout, binary.BigEndian.AppendUint32(nil, 1)},
 	} {
-		if err := n.config(group, uint32(i+1), attr.typ, attr.data); err != nil { //nolint:gosec // G115: small
+		if err := n.config(group, uint32(i+1), attr.typ, attr.data); err != nil {
 			_ = unix.Close(fd)
 			return nil, err
 		}

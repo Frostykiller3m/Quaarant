@@ -15,7 +15,7 @@ func nflogPacket(ifindex uint32, proto byte, dst [4]byte, port uint16) []byte {
 	b := []byte{2, 0, 0, 7} // AF_INET, v0, group 7
 	attr := func(typ uint16, v []byte) {
 		a := make([]byte, 4, 4+len(v)+3)
-		binary.NativeEndian.PutUint16(a[0:], uint16(4+len(v))) //nolint:gosec // test
+		binary.NativeEndian.PutUint16(a[0:], uint16(4+len(v)))
 		binary.NativeEndian.PutUint16(a[2:], typ)
 		a = append(a, v...)
 		for len(a)%4 != 0 {

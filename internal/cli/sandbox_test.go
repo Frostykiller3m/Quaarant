@@ -2,6 +2,7 @@ package cli
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -59,7 +60,8 @@ func TestCreateRequestFlags(t *testing.T) {
 	}
 	for _, bad := range []func() error{
 		func() error { _, err := createRequest("x", "docker", "none", "", "", 0, 0, nil); return err },
-		func() error { _, err := createRequest("x", "gvisor", "allow:pypi.org", "", "", 0, 0, nil); return err },
+		func() error { _, err := createRequest("x", "gvisor", "allow:", "", "", 0, 0, nil); return err },
+		func() error { _, err := createRequest("x", "gvisor", "open", "", "", 0, 0, nil); return err },
 		func() error { _, err := createRequest("x", "gvisor", "none", "", "", -1, 0, nil); return err },
 		func() error { _, err := createRequest("x", "gvisor", "none", "", "1q", 0, 0, nil); return err },
 		func() error {
@@ -69,6 +71,20 @@ func TestCreateRequestFlags(t *testing.T) {
 	} {
 		if bad() == nil {
 			t.Error("bad flags accepted")
+		}
+	}
+}
+
+func TestParseNet(t *testing.T) {
+	for in, want := range map[string]string{
+		"none":                                   "mode:MODE_NONE",
+		"log":                                    "mode:MODE_LOG",
+		"allow:pypi.org":                         `mode:MODE_ALLOW allow_domains:"pypi.org"`,
+		"allow:pypi.org, files.pythonhosted.org": `mode:MODE_ALLOW allow_domains:"pypi.org" allow_domains:"files.pythonhosted.org"`,
+	} {
+		np, err := parseNet(in)
+		if err != nil || strings.Join(strings.Fields(np.String()), " ") != want {
+			t.Errorf("parseNet(%q) = %v, %v; want %s", in, np, err, want)
 		}
 	}
 }

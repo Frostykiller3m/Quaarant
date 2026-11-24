@@ -260,7 +260,7 @@ func (c *Config) logGroup() uint16 {
 	}
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(c.Tag))
-	return uint16(31000 + h.Sum32()%1000) //nolint:gosec // G115: < 32000
+	return uint16(31000 + h.Sum32()%1000)
 }
 
 // slots is how many /30 links fit in the pool (index 0, the pool's first /30, is unused).

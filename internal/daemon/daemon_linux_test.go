@@ -53,6 +53,7 @@ type harness struct {
 	images *fakeImages
 	client qtdv1.SandboxServiceClient
 	socket string
+	wait   time.Duration // per exec; 0 = 10s
 }
 
 func newHarness(t *testing.T, caps backend.Capabilities, authorize func(Authorizer) Authorizer) *harness {
@@ -129,7 +130,11 @@ type execResult struct {
 
 func (h *harness) exec(t *testing.T, msgs ...*qtdv1.ExecRequest) execResult {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	wait := h.wait
+	if wait == 0 {
+		wait = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
 	defer cancel()
 	st, err := h.client.Exec(ctx)
 	if err != nil {

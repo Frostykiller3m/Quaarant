@@ -101,8 +101,10 @@ func New(ctx context.Context, cfg Config) (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("netpol: %w", err)
 	}
-	_ = run(ctx, nil, "nft", "delete", "table", "inet", tableName(cfg.Tag)) // stale, from a crash
-	if err := run(ctx, strings.NewReader(ruleset(&cfg)), "nft", "-f", "-"); err != nil {
+	// One transaction (nft -f is atomic): create the table if missing, delete it, write the
+	// new one. Live sandboxes (a qtd restart) are never without rules.
+	script := "table inet " + tableName(cfg.Tag) + "\ndelete table inet " + tableName(cfg.Tag) + "\n" + ruleset(&cfg)
+	if err := run(ctx, strings.NewReader(script), "nft", "-f", "-"); err != nil {
 		nl.close()
 		return nil, fmt.Errorf("netpol: install nftables rules: %w", err)
 	}
