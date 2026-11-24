@@ -24,8 +24,13 @@ make vet lint     # go vet, golangci-lint (v2); lint with GOOS=linux too for *_l
 make proto        # regenerate internal/api from proto/ (make tools installs pinned buf + plugins)
 make agent-deps   # fails if qt-agent links anything outside stdlib + internal/
 make check        # everything CI runs
-QT_ITEST=1 go test ./...   # integration tests (need runsc / KVM / root) — skipped otherwise
+sudo make itest   # unit + integration tests (QT_ITEST=1; need root, runsc, network) — skipped otherwise
+make build && sudo make install   # qt, qtd → /usr/local/bin, qt-agent → /usr/local/lib/quarantine, systemd unit
 ```
+
+Manual run: `sudo systemctl enable --now qtd`, be in the `quarantine` group, then
+`qt run alpine -- sh -c 'echo hi'`, `qt shell <id>`, `qt ls`, `qt rm <id>`. Lint with
+`GOOS=windows` too: Windows must keep building.
 
 ## Invariants (security — do not break)
 

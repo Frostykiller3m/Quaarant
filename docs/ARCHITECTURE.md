@@ -45,18 +45,60 @@ Both backends implement `internal/backend.Backend` and declare capability flags 
 `MemorySnapshot` and `Fork`. The CLI checks those flags and never assumes a feature exists.
 The two backends share integration tests, so the same command behaves the same on both.
 
+### gvisor backend (M1-T1)
+
+- **Root filesystem.** The cached image rootfs is the read-only lower layer of a host overlayfs;
+  `sandboxes/<id>/upper` receives every write, so the host sees changes without asking the guest.
+  runsc runs with `--overlay2=none` (no in-memory overlay). gVisor puts a tmpfs on an empty `/tmp`
+  by default, so the spec bind-mounts the overlay's own `/tmp` to keep `/tmp` writes visible too.
+  `upper/` gets the image root's mode, or the non-root user could not traverse `/`.
+- **Init.** The sandbox's PID 1 is the static `qt-agent pause`, bind-mounted read-only at
+  `/.qt/qt-agent`. It reaps orphans and ignores signals. It runs as its own non-root uid (65533),
+  because gVisor does not shield PID 1 from `kill -9` inside its pid namespace; with a different
+  uid and no `CAP_KILL`, sandboxed code cannot stop the sandbox. User commands use `runsc exec
+  --process <json>`, so untrusted argv is never parsed as runsc flags.
+- **Least privilege.** The sandbox user is the image's user when it is a resolvable non-root
+  user, else `65534:65534`. Every process has empty capability sets, `no_new_privs`, an OCI seccomp
+  profile enforced inside the sandbox (`--oci-seccomp`; denies ptrace, bpf, keyrings, mount,
+  namespaces, module loading, clock changes), and `--network=none`.
+- **Limits.** cgroup v2 at `/quarantine/qt-<id>`: `cpu.max`, `memory.max` (no swap), `pids.max`.
+  The host `pids.max` counts gVisor's own threads (sentry, gofer, systrap stubs), so the guest
+  process limit is enforced inside with `RLIMIT_NPROC` (fork fails with EAGAIN). The host
+  `pids.max` is `2×limit+256` as a backstop; hitting it would kill the whole sandbox.
+- **Restart.** runsc state lives in `/run/quarantine/runsc`. A restarted qtd finds running
+  sandboxes again via `runsc state` (the bundle holds `qt.json`). After a host reboot they are
+  `stopped`, and `qt rm` cleans them up.
+
+## qtd and its socket
+
+qtd runs as root under systemd (`contrib/systemd/qtd.service`, `make install`). It listens on
+`/run/quarantine/qtd.sock`, mode `0660 root:quarantine`. The gRPC transport credentials read
+`SO_PEERCRED` during the handshake. They admit root, qtd's own uid, and members of the
+`quarantine` group (primary gid, or a supplementary group from `/proc/<pid>/status`); every other
+peer is dropped before any RPC is read. Every request field is validated and size-bounded
+before it reaches a backend.
+
 ## Data dir
 
 ```
-/var/lib/quarantine/
-  images/<digest>/          unpacked OCI rootfs (gvisor) and rootfs.ext4 (vm), cached by digest
+/var/lib/quarantine/                (0700 root)
+  images/sha256-<hex>/      cached by manifest digest; appears only by atomic rename after unpack
+    rootfs/                 unpacked image (gvisor lower layer); rootfs.ext4 for vm (M2)
+    config.json, image.json image config; what was pulled from where
   golden/<digest>/          vm memory and disk snapshot ready to restore (M2-T2)
   sandboxes/<id>/
-    meta.json               spec, backend, created-at, policy
-    upper/                  writable copy-on-write layer (overlay upper or reflinked disk)
+    meta.json               image, isolation, user, env, limits, labels, created-at
+    upper/, work/           writable overlay layer (or reflinked disk for vm)
+    rootfs/                 overlay mount point (gvisor)
+    bundle/                 OCI config.json + qt.json (gvisor)
+    exec/, init.log         per-exec process specs; runsc create output
     events.jsonl            append-only event log
     honeytokens.json        the values planted in this sandbox (M4)
 ```
+
+Image layers are untrusted. Unpacking goes through an `os.Root`, so no entry name, symlink or hard
+link can reach outside the rootfs. Device nodes and fifos are skipped, setuid/setgid bits are
+dropped, and total size and entry count are bounded.
 
 `qt rm` deletes `sandboxes/<id>` and every host resource tied to it: cgroup, netns, tap,
 nftables sets, proxy and resolver. Tests check that nothing is left behind.

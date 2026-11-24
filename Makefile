@@ -22,7 +22,9 @@ BUF_VERSION                := v1.75.0
 PROTOC_GEN_GO_VERSION      := v1.36.12
 PROTOC_GEN_GO_GRPC_VERSION := v1.6.2
 
-.PHONY: build build-linux test vet lint fmt tidy proto proto-check proto-lint tools agent-deps check clean help
+PREFIX ?= /usr/local
+
+.PHONY: build build-linux test itest vet lint fmt tidy proto proto-check proto-lint tools agent-deps check install uninstall clean help
 
 build: ## Build all binaries for the host into bin/
 	@mkdir -p bin
@@ -34,6 +36,23 @@ build-linux: ## Build static linux/amd64 and linux/arm64 binaries into bin/linux
 
 test: ## Run unit tests with the race detector (needs cgo)
 	CGO_ENABLED=1 $(GO) test -race -count=1 ./...
+
+itest: ## Run integration tests too (as root, with runsc and network): sudo make itest
+	QT_ITEST=1 $(GO) test -count=1 -v ./... 2>&1 | grep -E '^(=== RUN|--- |ok|FAIL|PASS|panic)|_test\.go' ; exit $${PIPESTATUS[0]}
+
+install: ## Install bin/ (from `make build`) and the systemd unit, as root: sudo make install
+	@test -x bin/qtd -a -x bin/qt-agent || { echo "run make build first"; exit 1; }
+	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/lib/quarantine $(DESTDIR)/etc/systemd/system
+	install -m 0755 bin/qt bin/qtd $(DESTDIR)$(PREFIX)/bin/
+	install -m 0755 bin/qt-agent $(DESTDIR)$(PREFIX)/lib/quarantine/qt-agent
+	install -m 0644 contrib/systemd/qtd.service $(DESTDIR)/etc/systemd/system/qtd.service
+	getent group quarantine >/dev/null || groupadd --system quarantine
+	@echo "now: systemctl daemon-reload && systemctl enable --now qtd; usermod -aG quarantine <you>"
+
+uninstall: ## Remove what install added (sandboxes and images in /var/lib/quarantine are kept)
+	-systemctl disable --now qtd
+	rm -f $(DESTDIR)$(PREFIX)/bin/qt $(DESTDIR)$(PREFIX)/bin/qtd $(DESTDIR)/etc/systemd/system/qtd.service
+	rm -rf $(DESTDIR)$(PREFIX)/lib/quarantine
 
 vet: ## Run go vet
 	$(GO) vet ./...

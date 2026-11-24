@@ -1,0 +1,21 @@
+[Unit]
+Description=quarantine sandbox daemon (qtd)
+Documentation=https://github.com/Frostykiller3m/Quaarant
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/qtd
+Restart=on-failure
+# /run/quarantine holds the socket and runsc state; keep it across restarts so running
+# sandboxes are picked up again (qtd recovers them through `runsc state`).
+RuntimeDirectory=quarantine
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+StateDirectory=quarantine
+StateDirectoryMode=0700
+# Sandboxes live in their own cgroups (/quarantine/qt-<id>); stopping qtd must not kill them.
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

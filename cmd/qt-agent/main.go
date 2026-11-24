@@ -1,5 +1,5 @@
-// Command qt-agent is the quarantine guest agent. It runs inside Firecracker microVMs and talks
-// to qtd over vsock.
+// Command qt-agent is the quarantine guest agent. In gvisor sandboxes it is the init process
+// ("qt-agent pause"); in Firecracker microVMs (M2) it talks to qtd over vsock.
 //
 // It is always built static (CGO_ENABLED=0) and may only depend on the standard library and
 // internal packages: everything it links ends up inside untrusted guests.
@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/Frostykiller3m/Quaarant/internal/agent"
 	"github.com/Frostykiller3m/Quaarant/internal/version"
 )
 
@@ -21,6 +22,11 @@ func main() {
 		fmt.Println(version.Get().String("qt-agent"))
 		return
 	}
-	fmt.Fprintln(os.Stderr, "qt-agent: not implemented yet (see docs/BUILD_PLAN.md M2-T1)")
-	os.Exit(1)
+	switch flag.Arg(0) {
+	case "pause":
+		os.Exit(agent.Pause())
+	default:
+		fmt.Fprintln(os.Stderr, "usage: qt-agent pause | --version")
+		os.Exit(2)
+	}
 }
