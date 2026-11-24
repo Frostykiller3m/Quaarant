@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -70,6 +71,12 @@ func handle(conn *os.File) {
 			return
 		}
 		_ = w.JSON(agentproto.FrameResult, res)
+	case agentproto.OpConfigure:
+		if err := configure(req.Configure); err != nil {
+			_ = w.JSON(agentproto.FrameError, agentproto.Error{Message: err.Error()})
+			return
+		}
+		_ = w.JSON(agentproto.FrameResult, agentproto.Result{Version: version.Get().Version, Kernel: kernelRelease()})
 	case agentproto.OpCopyOut:
 		if err := copyOut(w, req.Path); err != nil {
 			_ = w.JSON(agentproto.FrameError, agentproto.Error{Message: err.Error()})
@@ -243,6 +250,36 @@ func copyOut(w *agentproto.Writer, p string) error {
 	}
 	if _, err := safetar.WriteTar(root, rel, w.DataWriter(agentproto.FrameData), safetar.DefaultTarLimits); err != nil {
 		return fmt.Errorf("copy_out: %w", err)
+	}
+	return nil
+}
+
+var hostnameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// configure makes a VM restored from a shared snapshot this sandbox's own.
+func configure(c *agentproto.Configure) error {
+	if c == nil || !hostnameRe.MatchString(c.Hostname) {
+		return errors.New("configure: bad request")
+	}
+	if err := syscall.Sethostname([]byte(c.Hostname)); err != nil {
+		return fmt.Errorf("configure: hostname: %w", err)
+	}
+	if c.UnixNano > 0 {
+		tv := syscall.NsecToTimeval(c.UnixNano)
+		if err := syscall.Settimeofday(&tv); err != nil {
+			return fmt.Errorf("configure: clock: %w", err)
+		}
+	}
+	if len(c.Entropy) > 0 {
+		f, err := os.OpenFile("/dev/urandom", os.O_WRONLY, 0)
+		if err != nil {
+			return fmt.Errorf("configure: entropy: %w", err)
+		}
+		_, werr := f.Write(c.Entropy[:min(len(c.Entropy), 4096)])
+		_ = f.Close()
+		if werr != nil {
+			return fmt.Errorf("configure: entropy: %w", werr)
+		}
 	}
 	return nil
 }

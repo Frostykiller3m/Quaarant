@@ -58,6 +58,8 @@ const (
 	OpExec    = "exec"
 	OpCopyIn  = "copy_in"
 	OpCopyOut = "copy_out"
+	// OpConfigure gives a VM restored from a golden snapshot its own identity.
+	OpConfigure = "configure"
 )
 
 // Request starts an operation.
@@ -67,6 +69,16 @@ type Request struct {
 	Path string `json:"path,omitempty"` // copy_in: destination dir; copy_out: what to archive
 	UID  uint32 `json:"uid,omitempty"`  // copy_in: owner of the extracted files
 	GID  uint32 `json:"gid,omitempty"`
+
+	Configure *Configure `json:"configure,omitempty"`
+}
+
+// Configure is sent once after a snapshot restore: the snapshot is shared by every sandbox
+// restored from it, so hostname, clock and randomness must be made the sandbox's own.
+type Configure struct {
+	Hostname string `json:"hostname"`
+	UnixNano int64  `json:"unix_nano"` // host wall clock
+	Entropy  []byte `json:"entropy"`   // mixed into /dev/urandom (the kernel also reseeds on VMGenID)
 }
 
 // Exec describes a process. The agent drops to UID/GID with no capabilities, no_new_privs,
