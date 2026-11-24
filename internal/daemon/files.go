@@ -148,6 +148,7 @@ func (s *Service) Diff(ctx context.Context, req *qtdv1.DiffRequest) (*qtdv1.Diff
 	if err != nil && !truncated {
 		return nil, status.Errorf(codes.FailedPrecondition, "diff: %v", err)
 	}
+	changes = hideHoneytokens(s.honeySet(req.GetSandboxId()), changes)
 	sort.Slice(changes, func(i, j int) bool { return changes[i].Path < changes[j].Path })
 	out := &qtdv1.DiffResponse{Truncated: truncated, Changes: make([]*qtdv1.Change, 0, len(changes))}
 	for _, c := range changes {

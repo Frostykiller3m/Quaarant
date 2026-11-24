@@ -233,11 +233,32 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
 
 ## M4 — Seeing everything: honeytokens + report
 
-- [ ] **M4-T1 · Honeytokens**
+- [x] **M4-T1 · Honeytokens**
       Done when: fake SSH key, AWS credentials, .env API keys and a browser cookie DB are planted
       per sandbox with unique values; a read is an event; a token found in outbound traffic or
       DNS is a red-flag event (the proxy scans plaintext and SNI/DNS; TLS bodies are out of
       scope unless `--inspect-tls`).
+
+  Done: `internal/honeytoken` generates and matches. qtd plants the set through `CopyIn`;
+  the event log adds read events; the resolver and proxy find values (raw, hex, base64,
+  base32) in DNS names, SNI and plaintext. `TestITestDaemonNetwork` covers a gvisor sandbox
+  over qtd's socket:
+  - the four files are owned by the sandbox user with mode 0600;
+  - `sqlite3` opens the cookie DB;
+  - `cat` of the AWS file and the cookie query are `read` events citing their file events;
+  - a base64 POST of the file and the key ID in a DNS name are red flags;
+  - `qt diff` hides the untouched tokens and shows a modified one.
+
+  The netpol itests also cover SNI, raw and base64 bodies, and a refused destination, in
+  both modes. Checked by hand on vm as well (read events as guest claims).
+
+  Follow-ups noted during M4-T1 (not done there):
+  - `--inspect-tls` (TLS interception with a per-sandbox CA, to scan TLS bodies) is not
+    built. TLS egress is matched on SNI only.
+  - Other transformations (gzip, encryption, character-by-character exfiltration across
+    connections) are not detected. Reading a copy of a token made by `cp` is not a read
+    event, but sending it out still is a red flag.
+  - Tokens live in `$HOME` only. M5's repo vetting could add a `.env` next to the repo.
 
 - [ ] **M4-T2 · Claude report**
       Done when: `qt report <id>` produces findings that each cite event ids; a validator drops

@@ -10,6 +10,7 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/Frostykiller3m/Quaarant/internal/events"
+	"github.com/Frostykiller3m/Quaarant/internal/honeytoken"
 )
 
 const (
@@ -30,13 +31,14 @@ type sandboxPolicy struct {
 
 	mu       sync.Mutex
 	resolved map[netip.Addr]time.Time // IP -> until when connections to it may be allowed
+	flagged  map[string]time.Time     // honeytoken red flags already recorded (token, trigger, dst)
 }
 
 func newSandboxPolicy(id string, rules Rules, emit Emitter, pool netip.Prefix) *sandboxPolicy {
 	if emit == nil {
 		emit = func(events.Payload) {}
 	}
-	return &sandboxPolicy{id: id, rules: rules, emit: emit, pool: pool, now: time.Now, resolved: map[netip.Addr]time.Time{}}
+	return &sandboxPolicy{id: id, rules: rules, emit: emit, pool: pool, now: time.Now, resolved: map[netip.Addr]time.Time{}, flagged: map[string]time.Time{}}
 }
 
 func (p *sandboxPolicy) learn(ips []netip.Addr, ttl time.Duration) {
@@ -127,6 +129,7 @@ func (p *sandboxPolicy) answerDNS(ctx context.Context, raw []byte, up upstreamFu
 		qname = "."
 	}
 	qtype := typeName(q.Type)
+	p.honey(p.rules.Honey.FindName(qname), "egress_dns", qname)
 	ev := events.DNS{QName: qname, QType: qtype}
 	resp := dnsmessage.Header{ID: hdr.ID, Response: true, RecursionDesired: hdr.RecursionDesired, RecursionAvailable: true}
 	var answers []netip.Addr
@@ -230,4 +233,28 @@ func rcodeName(r dnsmessage.RCode) string {
 		return "NOTIMP"
 	}
 	return "OTHER"
+}
+
+// honey records each honeytoken seen leaving the sandbox (a red flag), with where it went.
+func (p *sandboxPolicy) honey(hits []honeytoken.Hit, trigger, dst string) {
+	if len(dst) > 300 {
+		dst = dst[:300]
+	}
+	for _, h := range hits {
+		// The same sighting twice in a row (an A and an AAAA query, a retry) is one red flag.
+		key := h.TokenID + "|" + trigger + "|" + dst
+		p.mu.Lock()
+		now := p.now()
+		dup := now.Sub(p.flagged[key]) < 10*time.Second
+		if !dup {
+			if len(p.flagged) > 1024 {
+				clear(p.flagged)
+			}
+			p.flagged[key] = now
+		}
+		p.mu.Unlock()
+		if !dup {
+			p.emit(events.Honeytoken{TokenID: h.TokenID, TokenKind: h.Kind, Trigger: trigger, Dst: dst})
+		}
+	}
 }

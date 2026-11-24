@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 
 	qtdv1 "github.com/Frostykiller3m/Quaarant/internal/api/qtd/v1"
 	"github.com/Frostykiller3m/Quaarant/internal/backend"
+	"github.com/Frostykiller3m/Quaarant/internal/honeytoken"
 	"github.com/Frostykiller3m/Quaarant/internal/image"
 	"github.com/Frostykiller3m/Quaarant/internal/netpol"
 )
@@ -62,6 +64,7 @@ type Service struct {
 	log      *slog.Logger
 	locks    sync.Map // sandbox id -> *sync.Mutex (create/destroy are serialized per id)
 	logs     sync.Map // sandbox id -> *eventLog
+	honey    sync.Map // sandbox id -> *honeytoken.Set
 }
 
 // New loads the registry from the data dir and returns the service.
@@ -89,6 +92,7 @@ func New(opts Options) (*Service, error) {
 	for _, b := range opts.Backends {
 		s.backends[b.Name()] = b
 	}
+	s.loadHoneytokens()
 	s.adoptLinks(context.Background())
 	return s, nil
 }
@@ -165,9 +169,6 @@ func (s *Service) Create(ctx context.Context, req *qtdv1.CreateRequest) (*qtdv1.
 	if networked && s.opts.Net == nil {
 		return nil, status.Error(codes.FailedPrecondition, "this qtd has no sandbox networking (needs Linux with iproute2 and nftables; see `qt doctor` and the qtd log)")
 	}
-	if req.GetHoneytokens() {
-		return nil, status.Error(codes.Unimplemented, "honeytokens arrive in M4")
-	}
 	limits := limitsFromProto(req.GetLimits())
 	if limits.DiskBytes != 0 {
 		return nil, status.Error(codes.Unimplemented, "disk limits are not supported yet")
@@ -228,6 +229,14 @@ func (s *Service) Create(ctx context.Context, req *qtdv1.CreateRequest) (*qtdv1.
 			return nil, status.Errorf(codes.Internal, "vm disk image: %v", err)
 		}
 	}
+	var honey *honeytoken.Set
+	if req.GetHoneytokens() {
+		if honey, err = s.newHoneytokens(id, envValue(env, "HOME")); err != nil {
+			s.cleanup(id, be)
+			return nil, status.Errorf(codes.Internal, "honeytokens: %v", err)
+		}
+		rules.Honey = honeytoken.NewMatcher(honey)
+	}
 	network := backend.Network{None: true}
 	if networked {
 		l, nr, err := s.attach(ctx, id, iso, be, rules)
@@ -256,6 +265,12 @@ func (s *Service) Create(ctx context.Context, req *qtdv1.CreateRequest) (*qtdv1.
 	if err := be.Start(ctx, id); err != nil {
 		s.cleanup(id, be)
 		return nil, status.Errorf(codes.Internal, "start sandbox: %v", err)
+	}
+	if honey != nil {
+		if err := plantHoneytokens(ctx, be, id, honey); err != nil {
+			s.cleanup(id, be)
+			return nil, status.Errorf(codes.Internal, "%v", err)
+		}
 	}
 	s.log.Info("sandbox created", "id", id, "image", img.Ref, "isolation", iso, "user", user)
 	return &qtdv1.CreateResponse{Sandbox: s.toProto(ctx, rec)}, nil
@@ -286,6 +301,7 @@ func (s *Service) cleanup(id string, be backend.Backend) {
 	if l, ok := s.logs.LoadAndDelete(id); ok {
 		l.(*eventLog).close()
 	}
+	s.honey.Delete(id)
 	_ = os.RemoveAll(s.reg.workspace(id))
 	s.reg.remove(id)
 }
@@ -402,6 +418,7 @@ func (s *Service) Destroy(ctx context.Context, req *qtdv1.DestroyRequest) (*qtdv
 	if l, ok := s.logs.LoadAndDelete(id); ok {
 		l.(*eventLog).close() // ends followers after they read the last events
 	}
+	s.honey.Delete(id)
 	if err := os.RemoveAll(s.reg.workspace(id)); err != nil {
 		return nil, status.Errorf(codes.Internal, "remove workspace: %v", err)
 	}
@@ -527,4 +544,14 @@ func (o outWriter) Write(p []byte) (int, error) {
 		p = p[len(c):]
 	}
 	return n, nil
+}
+
+// envValue is the value of key in a KEY=VALUE list ("" if absent).
+func envValue(env []string, key string) string {
+	for _, e := range env {
+		if k, v, ok := strings.Cut(e, "="); ok && k == key {
+			return v
+		}
+	}
+	return ""
 }

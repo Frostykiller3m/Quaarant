@@ -17,6 +17,7 @@ import (
 	"unsafe"
 
 	"github.com/Frostykiller3m/Quaarant/internal/events"
+	"github.com/Frostykiller3m/Quaarant/internal/honeytoken"
 )
 
 const (
@@ -128,6 +129,16 @@ func (p *proxy) handle(c *net.TCPConn) {
 		wait = allowWait
 	}
 	first, h := peekHello(c, wait)
+	// Honeytokens in what the client sent, whatever the verdict: an attempt counts.
+	where := orDst(h.Host, dst)
+	var scan *honeytoken.Stream
+	if h.SNI != "" {
+		p.pol.honey(p.pol.rules.Honey.FindName(h.SNI), "egress_sni", h.SNI)
+	}
+	if h.Proto != "tls" { // TLS bodies are encrypted: out of scope
+		scan = p.pol.rules.Honey.NewStream()
+		p.pol.honey(scan.Write(first), "egress_plaintext", where)
+	}
 	if d := p.pol.decide(dst, h); d != nil {
 		deny(d, h)
 		return
@@ -165,7 +176,12 @@ func (p *proxy) handle(c *net.TCPConn) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		n, _ := io.Copy(up, c) // splice(2) between TCP sockets
+		var n int64
+		if scan == nil {
+			n, _ = io.Copy(up, c) // splice(2) between TCP sockets
+		} else {
+			n = copyScanning(up, c, func(b []byte) { p.pol.honey(scan.Write(b), "egress_plaintext", where) })
+		}
 		out.Add(n)
 		_ = up.CloseWrite()
 	}()
@@ -263,4 +279,24 @@ func originalDst(c *net.TCPConn) (netip.AddrPort, error) {
 	}
 	port := binary.BigEndian.Uint16(sa[2:4])
 	return netip.AddrPortFrom(netip.AddrFrom4([4]byte(sa[4:8])), port), nil
+}
+
+// copyScanning copies src to dst, showing every chunk to scan first.
+func copyScanning(dst io.Writer, src io.Reader, scan func([]byte)) int64 {
+	buf := make([]byte, 32<<10)
+	var n int64
+	for {
+		m, err := src.Read(buf)
+		if m > 0 {
+			scan(buf[:m])
+			w, werr := dst.Write(buf[:m])
+			n += int64(w)
+			if werr != nil {
+				return n
+			}
+		}
+		if err != nil {
+			return n
+		}
+	}
 }
