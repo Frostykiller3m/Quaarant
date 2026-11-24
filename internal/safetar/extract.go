@@ -1,4 +1,7 @@
-package image
+// Package safetar reads and writes tar archives whose contents are untrusted (image layers,
+// files copied into or out of sandboxes) without letting them touch anything outside the
+// directory they belong to. It uses only the standard library, so qt-agent can use it too.
+package safetar
 
 import (
 	"archive/tar"

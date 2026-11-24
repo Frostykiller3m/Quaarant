@@ -27,7 +27,7 @@ PROTO_GO_TOOLCHAIN         := go1.27.4
 
 PREFIX ?= /usr/local
 
-.PHONY: build build-linux test itest vet lint fmt tidy proto proto-check proto-lint tools agent-deps check install uninstall clean help
+.PHONY: build build-linux kernel test itest vet lint fmt tidy proto proto-check proto-lint tools agent-deps check install uninstall clean help
 
 build: ## Build all binaries for the host into bin/
 	@mkdir -p bin
@@ -36,6 +36,9 @@ build: ## Build all binaries for the host into bin/
 build-linux: ## Build static linux/amd64 and linux/arm64 binaries into bin/linux-<arch>/
 	$(foreach a,$(ARCHES),$(foreach b,$(BINARIES), \
 		GOOS=linux GOARCH=$(a) CGO_ENABLED=0 $(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o bin/linux-$(a)/$(b) ./cmd/$(b) &&)) true
+
+kernel: ## Build the Firecracker guest kernel (bin/kernel/vmlinux-*-qt)
+	scripts/build-kernel.sh
 
 test: ## Run unit tests with the race detector (needs cgo)
 	CGO_ENABLED=1 $(GO) test -race -count=1 ./...
@@ -48,6 +51,7 @@ install: ## Install bin/ (from `make build`) and the systemd unit, as root: sudo
 	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/lib/quarantine $(DESTDIR)/etc/systemd/system
 	install -m 0755 bin/qt bin/qtd $(DESTDIR)$(PREFIX)/bin/
 	install -m 0755 bin/qt-agent $(DESTDIR)$(PREFIX)/lib/quarantine/qt-agent
+	@k=$$(ls bin/kernel/vmlinux-*-qt 2>/dev/null | tail -1); if [ -n "$$k" ]; then install -m 0644 "$$k" $(DESTDIR)$(PREFIX)/lib/quarantine/vmlinux && echo "guest kernel: $$k"; else echo "no guest kernel (make kernel): vm isolation stays off"; fi
 	install -m 0644 contrib/systemd/qtd.service $(DESTDIR)/etc/systemd/system/qtd.service
 	getent group quarantine >/dev/null || groupadd --system quarantine
 	@echo "now: systemctl daemon-reload && systemctl enable --now qtd; usermod -aG quarantine <you>"

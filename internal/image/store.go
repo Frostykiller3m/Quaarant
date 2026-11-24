@@ -6,7 +6,7 @@
 //	<dir>/sha256-<hex>/image.json    what was pulled, from where, and when
 //
 // A digest directory appears only by an atomic rename after a complete unpack, so its existence
-// means it is complete. Image contents are untrusted: see Unpack.
+// means it is complete. Image contents are untrusted: see safetar.Unpack.
 package image
 
 import (
@@ -26,6 +26,8 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+
+	"github.com/Frostykiller3m/Quaarant/internal/safetar"
 )
 
 // Image is an unpacked image ready to back sandboxes.
@@ -42,7 +44,7 @@ type FetchFunc func(ctx context.Context, ref name.Reference, platform v1.Platfor
 // Store pulls and caches images under Dir.
 type Store struct {
 	Dir      string
-	Limits   UnpackLimits
+	Limits   safetar.UnpackLimits
 	Platform v1.Platform
 	Fetch    FetchFunc
 	// Chown keeps image file ownership (true when running as root).
@@ -56,7 +58,7 @@ type Store struct {
 func NewStore(dir string) *Store {
 	return &Store{
 		Dir:      dir,
-		Limits:   DefaultUnpackLimits,
+		Limits:   safetar.DefaultUnpackLimits,
 		Platform: v1.Platform{OS: "linux", Architecture: runtime.GOARCH},
 		Fetch:    remoteFetch,
 		Chown:    os.Geteuid() == 0,
@@ -76,7 +78,7 @@ type meta struct {
 	Ref       string    `json:"ref"`
 	Digest    string    `json:"digest"`
 	PulledAt  time.Time `json:"pulled_at"`
-	Stats     UnpackStats
+	Stats     safetar.UnpackStats
 }
 
 // Pull resolves ref (e.g. "alpine", "python:3.13-slim", "repo@sha256:...") and returns the
@@ -157,7 +159,7 @@ func (s *Store) unpack(ctx context.Context, img v1.Image, dir, requested, resolv
 	}
 	rc := mutate.Extract(img) // flattened, whiteouts applied; layer digests are verified on read
 	defer func() { _ = rc.Close() }()
-	stats, err := Unpack(contextReader{ctx, rc}, rootfs, s.Limits, s.Chown)
+	stats, err := safetar.Unpack(contextReader{ctx, rc}, rootfs, s.Limits, s.Chown)
 	if err != nil {
 		return fmt.Errorf("unpack %s: %w", resolved, err)
 	}

@@ -1,4 +1,4 @@
-package image
+package safetar
 
 import (
 	"archive/tar"

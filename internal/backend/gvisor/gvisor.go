@@ -373,6 +373,9 @@ func (b *Backend) Exec(ctx context.Context, id string, e backend.ExecSpec) (back
 	if err != nil {
 		return nil, err
 	}
+	if !b.commandExists(ctx, id, e.Argv[0], mergeEnv(bx.meta.Env, e.Env)) {
+		return notFound(e), nil // like a shell (and the vm agent): 127, not runsc's 128
+	}
 	base := &specs.Process{User: bx.meta.User, Rlimits: rlimits(bx.meta.PIDs)}
 	proc, err := execProcess(base, bx.meta.Env, bx.meta.Workdir, e)
 	if err != nil {

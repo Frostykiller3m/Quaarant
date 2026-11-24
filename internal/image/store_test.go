@@ -183,3 +183,43 @@ func TestLookupUser(t *testing.T) {
 		}
 	}
 }
+
+type entry struct {
+	name     string
+	typ      byte
+	body     string
+	link     string
+	mode     int64
+	uid, gid int
+}
+
+func tarOf(t *testing.T, entries ...entry) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for _, e := range entries {
+		mode := e.mode
+		if mode == 0 {
+			mode = 0o644
+			if e.typ == tar.TypeDir {
+				mode = 0o755
+			}
+		}
+		hdr := &tar.Header{Name: e.name, Typeflag: e.typ, Linkname: e.link, Mode: mode, Uid: e.uid, Gid: e.gid}
+		if e.typ == tar.TypeReg {
+			hdr.Size = int64(len(e.body))
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if e.typ == tar.TypeReg {
+			if _, err := tw.Write([]byte(e.body)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return &buf
+}
