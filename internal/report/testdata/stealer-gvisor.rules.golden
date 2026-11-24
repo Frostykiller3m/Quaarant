@@ -1,0 +1,18 @@
+Sandbox stealer-gvisor: MALICIOUS
+Engine:  rules (123 events)
+
+3 finding(s) in 123 events: a planted credential left the sandbox; planted credentials were read; probed the cloud metadata service.
+
+Findings (3):
+
+  [critical] A planted credential left the sandbox  (exfiltration, rules)
+      A fake credential qt planted turned up in outbound DNS, TLS SNI or plaintext: aws_credentials → example.com, aws_credentials → akialhhx2lxpvqehnun6.c2.example.net. Nothing legitimate sends these.
+      evidence: ev_2568a51a3860f98919c746040d3eed92, ev_6eb967625f5ba85454c4f17a798baaa8, ev_146c7ae8dea3c04d7269cc12b1143a6c
+
+  [high] Planted credentials were read  (honeytoken, rules)
+      A process opened fake credentials qt planted in $HOME (aws_credentials, ssh_key, env_api_key, browser_cookies). Code that looks for credentials it was not given is a classic stealer behaviour.
+      evidence: ev_b40b10a2ec08d83dc3cb6b6d6da5f6de, ev_841d8248073a3abd608fcefbc84e11db, ev_0d54ddaa14953d3c095eda366715dae6, ev_7c6b84b56cbef2c2086c4dc2c0a9ff7a, ev_70a4559ae561243362972ea96214ce9e, ev_9d707ca8cc428a0029ddd279a72c1f51
+
+  [high] Probed the cloud metadata service  (network, rules)
+      Connections to the instance-metadata address, where cloud credentials live. qt refused them.
+      evidence: ev_9d487669aaa81155fafd84ccaad95236

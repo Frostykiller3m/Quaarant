@@ -260,10 +260,37 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
     event, but sending it out still is a red flag.
   - Tokens live in `$HOME` only. M5's repo vetting could add a `.env` next to the repo.
 
-- [ ] **M4-T2 · Claude report**
+- [x] **M4-T2 · Claude report**
       Done when: `qt report <id>` produces findings that each cite event ids; a validator drops
       claims without evidence; a verdict (clean/suspicious/malicious); it works offline (rules
       only) without an API key.
+
+  Done: `internal/report` (rules, compaction, Claude through the official Go SDK, the
+  validator) and `qt report [--json] [--offline] [--model]`. Snapshot tests run on four real
+  recorded logs:
+  - a clean `pip install` is clean;
+  - a stealer on gvisor and on vm is malicious: credentials read and sent out, metadata
+    probed;
+  - a miner with persistence is malicious: xmrig run, `.profile`, `crontab -`, `curl | sh`.
+
+  The Claude path is tested through the SDK against a local fake API. The test checks the
+  request (model, effort, schema, fallbacks, untrusted wrapping, a planted
+  `</sandbox_events>` escaped). It checks that an invented evidence id and a category
+  mismatch are dropped while a valid finding is kept, and that a refusal, a 500, non-JSON
+  and `max_tokens` fall back to rules. `qt report` was also run by hand with the installed
+  qtd on a clean and a malicious sandbox.
+
+  Not verified: a live call to the Claude API. This machine has no API key, so the real
+  model's findings on these logs have not been seen. Run `ANTHROPIC_API_KEY=... qt report
+  <id>` to check. The plan's "forced tool call" became structured outputs (`claude-opus-5-5`
+  rejects a forced `tool_choice`); ARCHITECTURE explains.
+
+  Follow-ups noted during M4-T2 (not done there):
+  - `qt report` exits 0 whatever the verdict. M5's one-shot vetting will want a non-zero
+    exit for suspicious or malicious (or `--fail-on`).
+  - A live-API snapshot test (recorded responses, opt-in with a key) and an eval of the
+    findings on more varied logs.
+  - The report is not stored with the sandbox; each `qt report` asks again.
 
   ```text
   Implement qt report: compact the event log (dedupe, group by process tree, keep every

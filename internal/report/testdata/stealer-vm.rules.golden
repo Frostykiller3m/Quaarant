@@ -1,0 +1,22 @@
+Sandbox stealer-vm: MALICIOUS
+Engine:  rules (86 events)
+
+4 finding(s) in 86 events: a planted credential left the sandbox; planted credentials were read; probed the cloud metadata service.
+
+Findings (4):
+
+  [critical] A planted credential left the sandbox  (exfiltration, rules)
+      A fake credential qt planted turned up in outbound DNS, TLS SNI or plaintext: aws_credentials → akiazd4viyv4snza6rbv.c2.example.net. Nothing legitimate sends these.
+      evidence: ev_3bee6a092106983ce29e1bf23d22188d, ev_5cea283c90b4f56c7d59da69ffa6d59e
+
+  [high] Planted credentials were read  (honeytoken, rules)
+      A process opened fake credentials qt planted in $HOME (aws_credentials, ssh_key, env_api_key, browser_cookies). Code that looks for credentials it was not given is a classic stealer behaviour.
+      evidence: ev_b88c42c320ad6bb868942aca46bc2d4f, ev_126ff26fef5a651c73ea580f8228e9e3, ev_151b24498a8bb8dd844347b9eb69afbe, ev_8995ac081719ea18eab2a9c5b4cb23e9, ev_fc980efa2eb86818aa7f7b21ffe60c85, ev_e734a993e065bc256f946cc92bb835dd
+
+  [high] Probed the cloud metadata service  (network, rules)
+      Connections to the instance-metadata address, where cloud credentials live. qt refused them.
+      evidence: ev_e44d1bc4221c47c18ca375b3ed2d0bd0
+
+  [medium] Tried to get around the network allow-list  (network, rules)
+      Connections to addresses the resolver never returned, or with a TLS name or HTTP Host outside the allow-list: 1.1.1.1:443 (direct_ip).
+      evidence: ev_85aff245a4a4333124c582b979589b1b
