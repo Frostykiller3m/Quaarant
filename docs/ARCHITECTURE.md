@@ -147,6 +147,9 @@ The two backends share integration tests, so the same command behaves the same o
   Across runs here the p50 stays at 76-86 ms; p90 ranged from 83 ms to 386 ms (one slow
   restore in ten in one run). The CI gate is on the p50.
 
+  GitHub Actions ubuntu-24.04 runner (KVM, dm-thin), CI run 45379413309: create 20 ms, restore
+  25 ms, first exec 21 ms, **restore-to-exec p50 47 ms / p90 49 ms**; golden build 13.6 s.
+
   Through qtd and the CLI, `qt run --rm --isolation=vm alpine -- true` takes 0.25–0.30 s
   (create + start + exec ≈ 120 ms, rm ≈ 170 ms); gvisor takes 0.14 s. A golden build is ~4 s
   per image. The image store remembers tag resolutions for 10 minutes and serves cached
