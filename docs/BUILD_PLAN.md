@@ -128,7 +128,7 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
       Done when: a "golden" snapshot per image; restore-to-exec under 300 ms (benchmark in
       CI, numbers in docs); CoW disks via reflink, or a device-mapper thin fallback.
 
-  Done: restore-to-exec p50 76 ms / p90 83 ms here (docs/ARCHITECTURE.md has the table; the
+  Done: restore-to-exec p50 76-86 ms here, p90 83-386 ms (docs/ARCHITECTURE.md has the table; the
   CI `vm` job runs the same benchmark, fails above 300 ms p50, and prints the table in its
   summary). Disks: reflink where the data dir supports it, else dm-thin (used here, ext4);
   plain copy as the last resort. Restored sandboxes get their own hostname, clock and RNG
