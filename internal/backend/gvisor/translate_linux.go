@@ -288,8 +288,13 @@ func (t *translator) connect(m *pb.Connect) []events.Payload {
 	if !ok {
 		proto = "tcp" // socket created before monitoring or via dup: the common case
 	}
-	allowed := !t.netNone || addr.Addr().IsLoopback()
-	ev := events.Net{Op: "connect", Proto: proto, DstIP: addr.Addr().String(), DstPort: int(addr.Port()), Allowed: &allowed}
+	// Loopback stays inside the sandbox; with --net=none nothing else can connect. With a link
+	// the sentry only sees the attempt: qtd's proxy on the host decides (internal/netpol).
+	var allowed *bool
+	if v := addr.Addr().IsLoopback(); v || t.netNone {
+		allowed = &v
+	}
+	ev := events.Net{Op: "connect", Proto: proto, DstIP: addr.Addr().String(), DstPort: int(addr.Port()), Allowed: allowed}
 	if e := m.GetExit().GetErrorno(); e != int64(unix.EINPROGRESS) {
 		ev.Errno = errnoName(m.GetExit())
 	}

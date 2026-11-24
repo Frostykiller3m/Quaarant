@@ -198,6 +198,11 @@ func checkNftables(ctx context.Context, env Env) Result {
 		r.Hint = "install nftables (apt install nftables); needed for --net=allow and --net=log"
 		return r
 	}
+	if _, err := env.LookPath("ip"); err != nil { // sandbox links: netns, veth, routes
+		r.Status, r.Detail = Warn, "ip not found"
+		r.Hint = "install iproute2 (apt install iproute2); needed for --net=allow and --net=log"
+		return r
+	}
 	r.Status, r.Detail = OK, versionLine(ctx, env, "nft", "--version")
 	return r
 }

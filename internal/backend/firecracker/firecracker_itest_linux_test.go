@@ -24,6 +24,7 @@ import (
 	"github.com/Frostykiller3m/Quaarant/internal/backend/backendtest"
 	"github.com/Frostykiller3m/Quaarant/internal/events"
 	"github.com/Frostykiller3m/Quaarant/internal/image"
+	"github.com/Frostykiller3m/Quaarant/internal/netpol"
 )
 
 // Integration tests: QT_ITEST=1, root, /dev/kvm, firecracker + jailer on PATH, a guest kernel
@@ -104,11 +105,16 @@ func setupVM(t *testing.T) *vmEnv {
 
 func (v *vmEnv) start(t *testing.T, id string, lim backend.Limits) backend.Spec {
 	t.Helper()
+	return v.startNet(t, id, lim, backend.Network{None: true})
+}
+
+func (v *vmEnv) startNet(t *testing.T, id string, lim backend.Limits, n backend.Network) backend.Spec {
+	t.Helper()
 	s := backend.Spec{
 		ID: id, Image: v.Img.Ref, RootFS: v.Ext4, Workspace: filepath.Join(v.Data, "sb", id),
 		Hostname: "qt-" + id, User: "65534:65534",
 		Env:    []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/tmp"},
-		Limits: lim, Network: backend.Network{None: true}, Events: nopSink{},
+		Limits: lim, Network: n, Events: nopSink{},
 	}
 	if err := os.MkdirAll(s.Workspace, 0o700); err != nil {
 		t.Fatal(err)
@@ -450,4 +456,16 @@ func TestITestVMEvents(t *testing.T) {
 			t.Errorf("exec reported the ELF interpreter instead of the binary: %s", l)
 		}
 	}
+}
+
+func (vmSuite) Kind() netpol.Kind   { return netpol.Tap }
+func (vmSuite) Owner(id string) int { return jailID(id) }
+func (s vmSuite) StartNet(t *testing.T, id string, lim backend.Limits, n backend.Network) backend.Spec {
+	return s.v.startNet(t, id, lim, n)
+}
+
+// TestITestNetIsolation: probes from inside VMs on a tap link (M3-T1), restored from a
+// golden snapshot with a NIC.
+func TestITestNetIsolation(t *testing.T) {
+	backendtest.RunNet(t, vmSuite{setupVM(t)})
 }

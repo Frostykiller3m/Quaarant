@@ -5,9 +5,10 @@
 // filesystem is a host overlayfs: the cached image rootfs is the read-only lower layer and
 // <workspace>/upper receives every write, so the host can inspect changes (M1-T2).
 //
-// runsc is invoked with --network=none (M3 adds netns attachment), --overlay2=none (writes go to
-// the host overlay rather than gVisor's in-memory overlay), and --oci-seccomp so the OCI seccomp
-// profile is enforced inside the sandbox. Limits are cgroup v2 under <CgroupParent>/qt-<id>.
+// runsc is invoked with --network=none (or --network=sandbox on a netns qtd prepared, see
+// internal/netpol), --overlay2=none (writes go to the host overlay rather than gVisor's
+// in-memory overlay), and --oci-seccomp so the OCI seccomp profile is enforced inside the
+// sandbox. Limits are cgroup v2 under <CgroupParent>/qt-<id>.
 package gvisor
 
 import (
@@ -65,8 +66,18 @@ type boxMeta struct {
 	Workdir string     `json:"workdir"`
 	User    specs.User `json:"user"`
 	PIDs    int        `json:"pids"`
-	RootFS  string     `json:"rootfs"` // image rootfs: the overlay's lower layer
+	RootFS  string     `json:"rootfs"`           // image rootfs: the overlay's lower layer
+	Linked  bool       `json:"linked,omitempty"` // on a netns link (else --net=none)
 	Created time.Time  `json:"created"`
+}
+
+// networkFlag is runsc's --network for the sandbox: runsc reads it at create and at start
+// (where it scrapes the netns's interfaces into its netstack).
+func (m boxMeta) networkFlag() string {
+	if m.Linked {
+		return "--network=sandbox"
+	}
+	return "--network=none"
 }
 
 var _ backend.Backend = (*Backend)(nil)
@@ -120,7 +131,7 @@ func (b *Backend) run(ctx context.Context, args ...string) ([]byte, error) {
 	c.Stdout, c.Stderr = &stdout, &stderr
 	c.WaitDelay = 5 * time.Second
 	if err := runWithContext(ctx, c); err != nil {
-		return stdout.Bytes(), fmt.Errorf("runsc %s: %w: %s", args[0], err, tail(stderr.Bytes()))
+		return stdout.Bytes(), fmt.Errorf("runsc %s: %w: %s", subcommand(args), err, tail(stderr.Bytes()))
 	}
 	return stdout.Bytes(), nil
 }
@@ -141,8 +152,8 @@ func (b *Backend) Create(ctx context.Context, s backend.Spec) (err error) {
 	if err := s.Validate(); err != nil {
 		return fmt.Errorf("gvisor: %w", err)
 	}
-	if !s.Network.None {
-		return fmt.Errorf("gvisor: network attachment: %w (arrives in M3; use --net=none)", errors.ErrUnsupported)
+	if !s.Network.None && s.Network.NetnsPath == "" {
+		return fmt.Errorf("gvisor: a network link must be a netns: %w", errors.ErrUnsupported)
 	}
 	for _, p := range []string{s.RootFS, s.Workspace} {
 		if !filepath.IsAbs(p) || strings.ContainsAny(p, ",:\n") {
@@ -203,7 +214,7 @@ func (b *Backend) Create(ctx context.Context, s backend.Spec) (err error) {
 	if err != nil {
 		return fmt.Errorf("gvisor: %w", err)
 	}
-	bx.meta = boxMeta{Env: s.Env, Workdir: s.Workdir, User: user, PIDs: s.Limits.PIDs, RootFS: s.RootFS, Created: time.Now().UTC()}
+	bx.meta = boxMeta{Env: s.Env, Workdir: s.Workdir, User: user, PIDs: s.Limits.PIDs, RootFS: s.RootFS, Linked: !s.Network.None, Created: time.Now().UTC()}
 	if err := writeJSON(filepath.Join(bundleDir(s.Workspace), "config.json"), spec); err != nil {
 		return err
 	}
@@ -224,7 +235,7 @@ func (b *Backend) Create(ctx context.Context, s backend.Spec) (err error) {
 		return fmt.Errorf("gvisor: %w", err)
 	}
 	bx.obs = obs
-	c := b.cmd("--pod-init-config="+obs.traceConfig, "create", "--bundle", bundleDir(s.Workspace), containerID(s.ID))
+	c := b.cmd(bx.meta.networkFlag(), "--pod-init-config="+obs.traceConfig, "create", "--bundle", bundleDir(s.Workspace), containerID(s.ID))
 	c.Stdout, c.Stderr = logf, logf
 	if err := runWithContext(ctx, c); err != nil {
 		log, _ := os.ReadFile(filepath.Join(s.Workspace, "init.log"))
@@ -306,10 +317,11 @@ func writeJSON(path string, v any) error {
 
 // Start implements backend.Backend.
 func (b *Backend) Start(ctx context.Context, id string) error {
-	if _, err := b.lookup(ctx, id); err != nil {
+	bx, err := b.lookup(ctx, id)
+	if err != nil {
 		return err
 	}
-	if _, err := b.run(ctx, "start", containerID(id)); err != nil {
+	if _, err := b.run(ctx, bx.meta.networkFlag(), "start", containerID(id)); err != nil {
 		return fmt.Errorf("gvisor: %w", err)
 	}
 	return nil
@@ -684,4 +696,14 @@ func (p *process) readPID() int {
 		}
 	}
 	return 0
+}
+
+// subcommand is the first non-flag argument.
+func subcommand(args []string) string {
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") {
+			return a
+		}
+	}
+	return ""
 }

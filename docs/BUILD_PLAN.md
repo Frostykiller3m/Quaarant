@@ -171,9 +171,28 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
 
 ## M3 — Network policy
 
-- [ ] **M3-T1 · Isolated networking**
+- [x] **M3-T1 · Isolated networking**
       Done when: every sandbox has its own netns/tap; LAN, host, link-local and metadata are
       unreachable (probe test from inside); `--net=none` really is none.
+
+  Done: `internal/netpol` (a netns and veth for gvisor, a tap for vm, one `/30` each, one
+  nftables table, a per-sandbox TCP proxy, nothing routed). The shared `backendtest.RunNet`
+  probes from inside both backends: public TCP works through the proxy, while the gateway and
+  every host address, metadata, LAN and private ranges, the other sandbox and its gateway,
+  and the proxy port are refused at once in the kernel. UDP, ICMP, IPv6 and spoofed sources
+  don't get out. `--net=none` shows only `lo` and has no route out (both backends). Nothing
+  is left on the host after detach.
+
+  Follow-ups noted during M3-T1 (not done there):
+  - qtd does not attach links yet: `--net` still accepts only `none`. M3-T2 wires netpol
+    into Create and `qt rm` (with the leave-nothing test) and re-adopts links after a qtd
+    restart. Today `netpol.New` only replaces a stale table.
+  - Destinations refused in nftables never reach qtd, so they leave no event. M3-T2's
+    "denials are events" needs an nflog group (or a counter per link) for those resets.
+  - All UDP is dropped, DNS included, until the M3-T2 resolver.
+  - A host firewall that drops INPUT (ufw, firewalld) would also drop the redirected
+    connections; `qt doctor` should detect that. The proxy dials from the host's namespace,
+    so host routes (for example a VPN) apply to sandbox traffic.
 
 - [ ] **M3-T2 · Allow-list + log**
       Done when: `--net=allow:pypi.org` lets pip install work and nothing else (test); DNS and

@@ -136,7 +136,7 @@ func buildSpec(s backend.Spec, rootfs, agent, cgroupParent string) (*specs.Spec,
 				{Type: specs.IPCNamespace},
 				{Type: specs.UTSNamespace},
 				{Type: specs.MountNamespace},
-				{Type: specs.NetworkNamespace},
+				netns(s.Network),
 			},
 			Seccomp:       seccompProfile(),
 			MaskedPaths:   []string{"/proc/kcore", "/proc/keys", "/proc/timer_list", "/sys/firmware"},
@@ -210,4 +210,12 @@ func mergeEnv(base, over []string) []string {
 		out = append(out, kv)
 	}
 	return out
+}
+
+// netns is a fresh, empty network namespace (--net=none), or the one qtd prepared.
+func netns(n backend.Network) specs.LinuxNamespace {
+	if n.None {
+		return specs.LinuxNamespace{Type: specs.NetworkNamespace}
+	}
+	return specs.LinuxNamespace{Type: specs.NetworkNamespace, Path: n.NetnsPath}
 }

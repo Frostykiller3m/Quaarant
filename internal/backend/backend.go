@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/netip"
 	"regexp"
 	"strconv"
 	"strings"
@@ -179,12 +180,16 @@ type Spec struct {
 	Labels    map[string]string
 }
 
-// Network is how the sandbox is attached; qtd creates and polices it (M3).
+// Network is how the sandbox is attached; qtd creates and polices it (internal/netpol).
+// A sandbox with a link reaches only its gateway: every TCP connection is redirected to
+// qtd's proxy, everything else is dropped on the host.
 type Network struct {
-	None      bool   // loopback only
-	NetnsPath string // e.g. /run/netns/qt-<id> (gvisor)
-	TapDevice string // e.g. qt-<id> (vm)
-	MAC       string
+	None      bool         // loopback only
+	NetnsPath string       // a prepared network namespace (gvisor): /run/netns/<name>
+	TapDevice string       // a prepared tap device the VMM may open (vm)
+	MAC       string       // guest MAC (vm; optional)
+	Addr      netip.Prefix // the guest's address on its link, e.g. 10.231.0.6/30
+	Gateway   netip.Addr   // the host side of the link
 }
 
 // Limits are enforced with cgroups v2 (and VM sizing for vm).
@@ -226,8 +231,8 @@ func (s Spec) Validate() error {
 	if s.Events == nil {
 		errs = append(errs, errors.New("event sink is required"))
 	}
-	if s.Network.None && (s.Network.NetnsPath != "" || s.Network.TapDevice != "") {
-		errs = append(errs, errors.New("network: None conflicts with an attachment"))
+	if err := s.Network.validate(); err != nil {
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
@@ -350,4 +355,20 @@ type Info struct {
 	Isolation Isolation
 	State     State
 	CreatedAt time.Time
+}
+
+func (n Network) validate() error {
+	if n.None {
+		if n.NetnsPath != "" || n.TapDevice != "" || n.Addr.IsValid() {
+			return errors.New("network: None conflicts with an attachment")
+		}
+		return nil
+	}
+	if (n.NetnsPath == "") == (n.TapDevice == "") {
+		return errors.New("network: exactly one of a netns or a tap device is required (or None)")
+	}
+	if !n.Addr.IsValid() || !n.Addr.Addr().Is4() || !n.Gateway.Is4() || !n.Addr.Contains(n.Gateway) || n.Addr.Addr() == n.Gateway {
+		return fmt.Errorf("network: guest address %v and gateway %v must be IPv4 on one link", n.Addr, n.Gateway)
+	}
+	return nil
 }

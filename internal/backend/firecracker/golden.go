@@ -17,6 +17,7 @@ import (
 	"github.com/Frostykiller3m/Quaarant/internal/agentproto"
 	"github.com/Frostykiller3m/Quaarant/internal/backend"
 	"github.com/Frostykiller3m/Quaarant/internal/cgroups"
+	"github.com/Frostykiller3m/Quaarant/internal/netpol"
 )
 
 // A golden snapshot is a booted VM of one image, paused right after its agent came up:
@@ -77,6 +78,9 @@ func (b *Backend) inputsHash() (string, error) {
 func (b *Backend) goldenKey(s backend.Spec, vcpus, mem int, size int64) (string, error) {
 	h := sha256.New()
 	fmt.Fprintf(h, "qt-golden-v1|%s|%d|%d|%d", s.RootFS, vcpus, mem, size)
+	if !s.Network.None {
+		h.Write([]byte("|net")) // the snapshot has a NIC; restores point it at their own tap
+	}
 	if fi, err := os.Stat(s.RootFS); err == nil {
 		fmt.Fprintf(h, "|%d|%d", fi.Size(), fi.ModTime().UnixNano())
 	}
@@ -174,6 +178,17 @@ func (b *Backend) buildGolden(ctx context.Context, key, dir string, s backend.Sp
 	}
 	gs := s
 	gs.Hostname = "qt-golden"
+	if !s.Network.None {
+		// Its own tap, owned by the golden VMM and left down without a host address: the
+		// golden VM can't send anything. Restores override it with the sandbox's tap.
+		tap := "qtg" + key[:8]
+		_ = netpol.DeleteTap(tap)
+		if err := netpol.CreateTap(tap, jid); err != nil {
+			return nil, fmt.Errorf("golden: %w", err)
+		}
+		defer func() { _ = netpol.DeleteTap(tap) }()
+		gs.Network = backend.Network{TapDevice: tap}
+	}
 	cfg, err := vmConfig(gs)
 	if err != nil {
 		return nil, err
@@ -298,17 +313,21 @@ func (b *Backend) restore(ctx context.Context, bx *box, hostname string) error {
 			return errors.New("firecracker: API socket did not appear")
 		}
 	}
-	if err := newAPI(sock).put(ctx, "/snapshot/load", map[string]any{
+	load := map[string]any{
 		"snapshot_path": "/vmstate",
 		"mem_backend":   map[string]any{"backend_type": "File", "backend_path": "/mem"},
 		"resume_vm":     true,
-	}); err != nil {
+	}
+	if n := bx.meta.Net; n != nil {
+		load["network_overrides"] = []map[string]any{{"iface_id": "eth0", "host_dev_name": n.Tap}}
+	}
+	if err := newAPI(sock).put(ctx, "/snapshot/load", load); err != nil {
 		return err
 	}
 	seed := make([]byte, 64)
 	_, _ = rand.Read(seed)
 	req := agentproto.Request{Op: agentproto.OpConfigure, Configure: &agentproto.Configure{
-		Hostname: hostname, UnixNano: time.Now().UnixNano(), Entropy: seed,
+		Hostname: hostname, UnixNano: time.Now().UnixNano(), Entropy: seed, Net: bx.meta.Net.agent(),
 	}}
 	var last error
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {

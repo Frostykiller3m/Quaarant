@@ -84,6 +84,13 @@ type Configure struct {
 	Hostname string `json:"hostname"`
 	UnixNano int64  `json:"unix_nano"` // host wall clock
 	Entropy  []byte `json:"entropy"`   // mixed into /dev/urandom (the kernel also reseeds on VMGenID)
+	Net      *Net   `json:"net,omitempty"`
+}
+
+// Net configures the guest's eth0 (its link to qtd's host-side proxy).
+type Net struct {
+	Addr    string `json:"addr"`    // CIDR, e.g. 10.231.0.6/30
+	Gateway string `json:"gateway"` // e.g. 10.231.0.5
 }
 
 // Exec describes a process. The agent drops to UID/GID with no capabilities, no_new_privs,
