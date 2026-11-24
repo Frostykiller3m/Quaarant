@@ -53,6 +53,7 @@ type harness struct {
 	images *fakeImages
 	client qtdv1.SandboxServiceClient
 	socket string
+	wait   time.Duration // per exec; 0 = 10s
 }
 
 func newHarness(t *testing.T, caps backend.Capabilities, authorize func(Authorizer) Authorizer) *harness {
@@ -129,7 +130,11 @@ type execResult struct {
 
 func (h *harness) exec(t *testing.T, msgs ...*qtdv1.ExecRequest) execResult {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	wait := h.wait
+	if wait == 0 {
+		wait = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
 	defer cancel()
 	st, err := h.client.Exec(ctx)
 	if err != nil {
@@ -281,7 +286,7 @@ func TestCreateValidation(t *testing.T) {
 		code codes.Code
 	}{
 		{"vm unavailable", &qtdv1.CreateRequest{Image: "alpine", Isolation: qtdv1.Isolation_ISOLATION_VM}, codes.FailedPrecondition},
-		{"net allow", &qtdv1.CreateRequest{Image: "alpine", Net: &qtdv1.NetPolicy{Mode: qtdv1.NetPolicy_MODE_ALLOW, AllowDomains: []string{"pypi.org"}}}, codes.Unimplemented},
+		{"net allow", &qtdv1.CreateRequest{Image: "alpine", Net: &qtdv1.NetPolicy{Mode: qtdv1.NetPolicy_MODE_ALLOW, AllowDomains: []string{"pypi.org"}}}, codes.FailedPrecondition}, // no netpol manager in this Service
 		{"honeytokens", &qtdv1.CreateRequest{Image: "alpine", Honeytokens: true}, codes.Unimplemented},
 		{"tiny memory", &qtdv1.CreateRequest{Image: "alpine", Limits: &qtdv1.Limits{MemoryBytes: 1 << 20}}, codes.InvalidArgument},
 		{"disk limit", &qtdv1.CreateRequest{Image: "alpine", Limits: &qtdv1.Limits{DiskBytes: 1 << 30}}, codes.Unimplemented},

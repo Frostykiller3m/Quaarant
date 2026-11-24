@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"os"
 	"syscall"
 	"unsafe"
 
@@ -63,6 +64,13 @@ func configureNet(n *agentproto.Net) error {
 	binary.NativeEndian.PutUint16(rt[56:58], rtfUp|rtfGateway)
 	if err := ioctl(fd, siocADDRT, unsafe.Pointer(&rt[0])); err != nil && !errors.Is(err, syscall.EEXIST) { //nolint:gosec // G103: struct rtentry
 		return fmt.Errorf("net: default route: %w", err)
+	}
+	// qtd's resolver is the gateway (DNS to any server reaches it anyway). Replace whatever
+	// the image has, symlinks included.
+	_ = os.Remove("/etc/resolv.conf")
+	rc := "# qt: DNS is answered by qtd on the host\nnameserver " + gw.String() + "\noptions ndots:1 timeout:2 attempts:2\n"
+	if err := os.WriteFile("/etc/resolv.conf", []byte(rc), 0o644); err != nil { //nolint:gosec // G306: world-readable, like every resolv.conf
+		return fmt.Errorf("net: resolv.conf: %w", err)
 	}
 	return nil
 }

@@ -11,21 +11,29 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/Frostykiller3m/Quaarant/internal/events"
 )
 
 const (
 	maxConns    = 512 // concurrent connections per sandbox
 	dialTimeout = 10 * time.Second
 	soOrigDst   = 80 // SO_ORIGINAL_DST (linux/netfilter_ipv4.h)
+	// How long the proxy waits for the client's first bytes. In allow mode it must see them
+	// (SNI/Host) to decide; in log mode they only enrich the record, so a protocol where the
+	// server speaks first is delayed by at most logWait.
+	allowWait = 10 * time.Second
+	logWait   = 2 * time.Second
 )
 
 // proxy accepts one sandbox's redirected TCP connections on its gateway address.
 type proxy struct {
 	m      *Manager
-	id     string
+	pol    *sandboxPolicy
 	ln     *net.TCPListener
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -35,13 +43,13 @@ type proxy struct {
 	wg     sync.WaitGroup
 }
 
-func (m *Manager) startProxy(id string, at netip.AddrPort) (*proxy, error) {
+func (m *Manager) startProxy(pol *sandboxPolicy, at netip.AddrPort) (*proxy, error) {
 	ln, err := net.ListenTCP("tcp4", net.TCPAddrFromAddrPort(at))
 	if err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	p := &proxy{m: m, id: id, ln: ln, ctx: ctx, cancel: cancel, sem: make(chan struct{}, maxConns), conns: map[net.Conn]struct{}{}}
+	p := &proxy{m: m, pol: pol, ln: ln, ctx: ctx, cancel: cancel, sem: make(chan struct{}, maxConns), conns: map[net.Conn]struct{}{}}
 	p.wg.Add(1)
 	go p.serve()
 	return p, nil
@@ -62,6 +70,7 @@ func (p *proxy) serve() {
 		default:
 			_ = c.SetLinger(0)
 			_ = c.Close()
+			p.pol.emit(events.PolicyDenied{Policy: "net", Target: "tcp", Reason: "rate_limited", Rule: fmt.Sprintf("more than %d open connections", maxConns)})
 			continue
 		}
 		p.wg.Add(1)
@@ -94,50 +103,94 @@ func (p *proxy) handle(c *net.TCPConn) {
 	}
 	defer p.track(c, false)
 	defer func() { _ = c.Close() }()
+	start := time.Now()
 	dst, err := originalDst(c)
-	if err == nil {
-		err = Forbidden(dst.Addr(), p.m.cfg.Pool, localAddrs())
-	}
-	if err == nil {
-		err = p.m.cfg.Policy.Allow(p.ctx, p.id, dst)
-	}
-	var up *net.TCPConn
-	if err == nil {
-		d := net.Dialer{Timeout: dialTimeout}
-		var uc net.Conn
-		if uc, err = d.DialContext(p.ctx, "tcp4", dst.String()); err == nil {
-			up = uc.(*net.TCPConn)
-		}
-	}
-	p.decided(dst, err)
 	if err != nil {
-		_ = c.SetLinger(0) // a reset: the guest sees "connection refused"
+		_ = c.SetLinger(0)
 		return
 	}
+	ev := events.Net{Op: "connect", Proto: "tcp", DstIP: dst.Addr().String(), DstPort: int(dst.Port())}
+	deny := func(d *Denial, h hello) {
+		_ = c.SetLinger(0) // a reset: the guest sees "connection refused"/"reset"
+		f := false
+		ev.Allowed, ev.SNI, ev.HTTPHost = &f, h.SNI, h.Host
+		p.pol.emit(ev)
+		p.pol.emit(events.PolicyDenied{Policy: "net", Target: truncate(d.Target, 4096), Reason: d.Reason, Rule: truncate(d.Rule, 256)})
+		p.decided(dst, h, d)
+	}
+	// The kernel already refused these; this is the second line.
+	if err := Forbidden(dst.Addr(), p.m.cfg.Pool, localAddrs()); err != nil {
+		deny(&Denial{Reason: rangeReason(dst.Addr()), Target: dst.String(), Rule: err.Error()}, hello{})
+		return
+	}
+	wait := logWait
+	if p.pol.rules.Mode == ModeAllow {
+		wait = allowWait
+	}
+	first, h := peekHello(c, wait)
+	if d := p.pol.decide(dst, h); d != nil {
+		deny(d, h)
+		return
+	}
+	ev.SNI, ev.HTTPHost = h.SNI, h.Host
+	d := net.Dialer{Timeout: dialTimeout}
+	uc, err := d.DialContext(p.ctx, "tcp4", dst.String())
+	t := true
+	ev.Allowed = &t
+	if err != nil {
+		ev.Errno = errnoOf(err)
+		p.pol.emit(ev)
+		p.decided(dst, h, nil)
+		_ = c.SetLinger(0)
+		return
+	}
+	p.pol.emit(ev)
+	p.decided(dst, h, nil)
+	up := uc.(*net.TCPConn)
 	if !p.track(up, true) {
 		_ = up.Close()
 		return
 	}
 	defer p.track(up, false)
 	defer func() { _ = up.Close() }()
+	var out, in atomic.Int64
+	if len(first) > 0 {
+		n, err := up.Write(first)
+		out.Add(int64(n))
+		if err != nil {
+			return
+		}
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, _ = io.Copy(up, c) // splice(2) between TCP sockets
+		n, _ := io.Copy(up, c) // splice(2) between TCP sockets
+		out.Add(n)
 		_ = up.CloseWrite()
 	}()
-	_, _ = io.Copy(c, up)
+	n, _ := io.Copy(c, up)
+	in.Add(n)
 	_ = c.CloseWrite()
 	wg.Wait()
+	bo, bi, ms := out.Load(), in.Load(), time.Since(start).Milliseconds()
+	cl := events.Net{
+		Op: "close", Proto: "tcp", DstIP: ev.DstIP, DstPort: ev.DstPort, SNI: ev.SNI, HTTPHost: ev.HTTPHost,
+		Allowed: &t, BytesOut: &bo, BytesIn: &bi, DurationMS: &ms,
+	}
+	p.pol.emit(cl)
 }
 
-func (p *proxy) decided(dst netip.AddrPort, err error) {
-	if err != nil {
-		p.m.log.Debug("sandbox connection refused", "sandbox", p.id, "dst", dst, "err", err)
+func (p *proxy) decided(dst netip.AddrPort, h hello, d *Denial) {
+	if d != nil {
+		p.m.log.Debug("sandbox connection refused", "sandbox", p.pol.id, "dst", dst, "reason", d.Reason, "target", d.Target)
 	}
 	if f := p.m.cfg.OnDecision; f != nil {
-		f(Decision{Sandbox: p.id, Dst: dst, Err: err})
+		x := Decision{Sandbox: p.pol.id, Dst: dst, SNI: h.SNI, Host: h.Host}
+		if d != nil {
+			x.Err = d
+		}
+		f(x)
 	}
 }
 
@@ -150,6 +203,40 @@ func (p *proxy) close() {
 	}
 	p.mu.Unlock()
 	p.wg.Wait()
+}
+
+func errnoOf(err error) string {
+	var e syscall.Errno
+	if errors.As(err, &e) {
+		switch e {
+		case syscall.ECONNREFUSED:
+			return "ECONNREFUSED"
+		case syscall.ETIMEDOUT:
+			return "ETIMEDOUT"
+		case syscall.EHOSTUNREACH:
+			return "EHOSTUNREACH"
+		case syscall.ENETUNREACH:
+			return "ENETUNREACH"
+		case syscall.ECONNRESET:
+			return "ECONNRESET"
+		}
+	}
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return "ETIMEDOUT"
+	}
+	return "EIO"
+}
+
+// truncate cuts s to n bytes on a UTF-8 boundary.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && s[n]&0xc0 == 0x80 {
+		n--
+	}
+	return s[:n]
 }
 
 // originalDst is where the guest was connecting before nftables redirected it here.

@@ -155,6 +155,9 @@ func jailRoot(ws, id string) string {
 // jailID is the unprivileged uid/gid the VMM runs as: distinct per sandbox, never a real user.
 func jailID(id string) int { return 900_000 + int(crc32.ChecksumIEEE([]byte(id))%90_000) }
 
+// LinkOwner is the uid sandbox id's VMM runs as: the owner of its tap (internal/netpol).
+func (b *Backend) LinkOwner(id string) int { return jailID(id) }
+
 func (b *Backend) statePath(id string) string { return filepath.Join(b.cfg.StateDir, id+".json") }
 
 // Create implements backend.Backend: jail directory, kernel, initramfs, disk, VM config.

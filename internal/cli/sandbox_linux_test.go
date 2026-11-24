@@ -135,7 +135,8 @@ func TestCLIErrors(t *testing.T) {
 		want string
 	}{
 		{"run without command", []string{"run", "alpine"}, "missing COMMAND"},
-		{"net policy", []string{"run", "--net=log", "alpine", "true"}, "only --net=none"},
+		{"net policy without networking", []string{"run", "--net=log", "alpine", "true"}, "no sandbox networking"},
+		{"bad net policy", []string{"run", "--net=open", "alpine", "true"}, "want none, log or allow:"},
 		{"unknown sandbox", []string{"exec", "abcdef123456", "true"}, "no sandbox abcdef123456"},
 		{"rm without ids", []string{"rm"}, "give sandbox ids"},
 		{"vm unavailable", []string{"run", "--isolation=vm", "alpine", "true"}, "not available on this host"},

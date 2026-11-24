@@ -337,8 +337,46 @@ without ever routing sandbox traffic.
   points `eth0` at the sandbox's tap. The agent's `configure` sets the address and default
   route with ioctls. A cold boot does the same after the agent is up. `--net=none` VMs have no
   NIC at all.
-- **What the guest sees.** `eth0` with its `/30` and a default route. Public TCP works.
-  Everything forbidden is "connection refused" at once. UDP, ICMP and IPv6 get no answer.
+- **What the guest sees.** `eth0` with its `/30`, a default route, and a `resolv.conf`
+  naming the gateway. Public TCP works, subject to the policy below. Everything forbidden is
+  "connection refused" at once. UDP (except DNS), ICMP and IPv6 get no answer.
+
+### Policy and records (M3-T2)
+
+`qt run --net=log` or `--net=allow:pypi.org,files.pythonhosted.org`. A domain also allows
+its subdomains. qtd attaches the link at create time and records it in the sandbox's record.
+`qt rm` and failed creates detach it. A restarted qtd adopts every recorded link, prunes
+links nothing owns, and replaces its nftables table in one transaction, so live sandboxes are
+never without rules.
+
+- **DNS.** UDP and TCP to port 53, to any server, are redirected to the sandbox's resolver
+  on `gateway:15053`. For a permitted name, an A query is asked of the host's resolvers
+  (`/etc/resolv.conf`) with a fresh query that carries nothing from the guest but the name.
+  Answers are flattened to A records. Forbidden addresses are dropped (DNS rebinding to
+  metadata, for example), and the guest is told TTL ≤ 300 s. Every returned address is
+  remembered for its TTL (at least 1 minute, at most 1 hour). Other query types for a
+  permitted name get an empty answer: no IPv6, and no HTTPS/SVCB records, so no ECH configs.
+  A name outside the allow-list gets NXDOMAIN. Every query is a `dns` event, and each
+  refusal also a `policy_denied` event.
+- **TCP.** The proxy reads the client's first bytes: a TLS ClientHello, parsed by
+  `crypto/tls`, or HTTP request headers. In allow mode it waits up to 10 s, in log mode up to
+  2 s, so a server-first protocol is delayed by at most that. In allow mode a connection
+  needs two things: the destination must be an address the resolver returned for a
+  permitted name, and the SNI or Host must be permitted. Otherwise the reason is
+  `direct_ip` or `sni_mismatch`. TLS without SNI or with an encrypted ClientHello is
+  refused, as is any other protocol (`not_allowlisted`). The IP allow set lives in the
+  proxy rather than in an nftables set: all TCP passes through the proxy anyway, and this
+  way every refusal is seen and recorded. Log mode allows every public destination.
+  Each connection is a `net` connect event, with the SNI or Host, and a close event with
+  bytes and duration. A refusal is a `net` event with `allowed: false` plus a
+  `policy_denied` event. All of these are `source: host`.
+- **Kernel refusals.** Forbidden destinations (rejected TCP SYNs) and non-DNS UDP and ICMP
+  are logged to an nflog group, rate-limited to 100/s with a burst of 200 per host. qtd
+  maps each one to its sandbox by the incoming interface and records `policy_denied`
+  (`metadata`, `blocked_range` or `not_allowlisted`) and `net` with `allowed: false`.
+- **Measured.** A warm `qt run --rm --isolation=vm --net=allow:example.com alpine -- true`
+  takes 0.39–0.49 s, against 0.34–0.39 s with `--net=none`. The first networked VM builds
+  its own golden snapshot (about 5 s, once per image).
 
 ## Honeytokens and report
 
@@ -373,7 +411,7 @@ without ever routing sandbox traffic.
 | `internal/safetar` | untrusted tar in/out (stdlib only: used by qt-agent too) | M2-T1 |
 | `internal/cgroups` | the cgroup v2 parent for sandboxes | M2-T1 |
 | `scripts/build-kernel.sh`, `kernel/` | reproducible guest kernel | M2-T1 |
-| `internal/netpol` | sandbox links (netns/veth, tap), nftables, TCP proxy; resolver and SNI checks in M3-T2 | M3 |
+| `internal/netpol` | sandbox links (netns/veth, tap), nftables, resolver, SNI/Host proxy, nflog refusals | M3 |
 | `internal/honeytoken` | plant and detect | M4-T1 |
 | `internal/report` | compaction, Claude, rules, validator | M4-T2 |
 | `internal/vet` | `qt run <git-url>` flow | M5 |

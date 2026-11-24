@@ -32,6 +32,7 @@ type Link struct {
 	Netns   string
 	Gateway netip.Addr
 	Guest   netip.Prefix
+	Rules   Rules
 }
 
 var errLinux = fmt.Errorf("netpol: sandbox networking needs Linux: %w", errors.ErrUnsupported)
@@ -43,7 +44,18 @@ func New(context.Context, Config) (*Manager, error) { return nil, errLinux }
 func (*Link) Network() backend.Network { return backend.Network{} }
 
 // Attach is Linux-only.
-func (*Manager) Attach(context.Context, string, Kind, int) (*Link, error) { return nil, errLinux }
+func (*Manager) Attach(context.Context, string, Kind, int, Rules, Emitter) (*Link, error) {
+	return nil, errLinux
+}
+
+// Adopt is Linux-only.
+func (*Manager) Adopt(string, Kind, int, Rules, Emitter) (*Link, error) { return nil, errLinux }
+
+// Prune is Linux-only.
+func (*Manager) Prune(context.Context) error { return nil }
+
+// Release is Linux-only.
+func (*Manager) Release() {}
 
 // Detach is Linux-only.
 func (*Manager) Detach(context.Context, string) error { return nil }

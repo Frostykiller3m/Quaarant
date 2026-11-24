@@ -206,6 +206,11 @@ func (b *Backend) Create(ctx context.Context, s backend.Spec) (err error) {
 	if err := ensureTmp(rootfsDir(s.Workspace)); err != nil {
 		return fmt.Errorf("gvisor: %w", err)
 	}
+	if !s.Network.None {
+		if err := os.WriteFile(resolvConfPath(s.Workspace), ResolvConf(s.Network.Gateway), 0o644); err != nil { //nolint:gosec // G306: read by the sandbox
+			return fmt.Errorf("gvisor: resolv.conf: %w", err)
+		}
+	}
 	spec, err := buildSpec(s, rootfsDir(s.Workspace), b.cfg.AgentPath, b.cfg.CgroupParent)
 	if err != nil {
 		return fmt.Errorf("gvisor: %w", err)

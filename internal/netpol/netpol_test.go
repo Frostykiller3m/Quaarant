@@ -71,7 +71,7 @@ func TestLink(t *testing.T) {
 }
 
 func TestConfigValidate(t *testing.T) {
-	ok := Config{Tag: "qt", Pool: DefaultPool, ProxyPort: DefaultProxyPort}
+	ok := Config{Tag: "qt", Pool: DefaultPool, ProxyPort: DefaultProxyPort, DNSPort: DefaultDNSPort}
 	if err := ok.validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,8 @@ func TestConfigValidate(t *testing.T) {
 }
 
 func TestRuleset(t *testing.T) {
-	r := ruleset("qt", 15001, DefaultPool)
+	c := Config{Tag: "qt", Pool: DefaultPool, ProxyPort: 15001, DNSPort: 15053}
+	r := ruleset(&c)
 	for _, want := range []string{
 		"table inet quarantine_qt {",
 		`iifname "qtn*" meta nfproto ipv6 drop`,
