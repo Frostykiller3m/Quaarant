@@ -55,7 +55,7 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
   - M1-T2 (resolved there): `--file-access=exclusive` caches failed lookups, so files copied in
     from the host stayed invisible; the root mount now uses `--file-access=shared`. `/.qt/` is
     hidden from diffs. `Limits.DiskBytes` is still rejected until a disk quota exists.
-  - M1-T3: qtd's `eventLog` writer is minimal (no follow, no runtime monitoring yet).
+  - M1-T3 (done there): the event log now has runtime monitoring, limits and follow.
   - Sandboxes do not survive a host (or WSL distro) restart: runsc state lives in /run. qtd then
     shows them as `stopped` and `qt rm` cleans them up (checked by hand). WSL shuts an idle distro
     down when no terminal is attached; keep one open, or see WSL's idle-timeout settings.
@@ -73,9 +73,25 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
   - Diff hashes every changed regular file in full; a sandbox writing huge files makes diff slow.
     Bounded by MaxChanges (100k entries) but not by bytes.
 
-- [ ] **M1-T3 · Events from gVisor**
+- [x] **M1-T3 · Events from gVisor**
       Done when: exec, file open/write/unlink and connect events stream to `events.jsonl` via
       runsc runtime monitoring; `qt events <id> --follow` works; every event passes the schema.
+
+  Done with one deviation: runsc has no trace points with paths for unlink/rename/mkdir, so
+  those come from a host-side inotify watcher on the overlay upper dir (host-observed, no pid).
+  exec, open, write and connect come from runsc runtime monitoring.
+
+  Follow-ups noted during M1-T3 (not done there):
+  - The monitoring connection does not survive a qtd restart (the sandboxed sentry cannot
+    reconnect): a sandbox that outlives qtd keeps running unobserved. Either keep a small
+    per-sandbox collector process alive across qtd restarts, or refuse to keep such sandboxes.
+  - Dropped events (rate, size, sentry backpressure) are only logged by qtd; surface a count
+    in `qt ls`/`qt events` and in the M4 report.
+  - `exec.exit_code` is not filled in (`sentry/exit_notify_parent` carries the status).
+  - Connects on sockets created before monitoring or via dup default to `tcp`.
+  - Recursive inotify sees very fast activity in brand-new directories as its end state.
+  - M3 will add host-side (netns/proxy) net events; decide then whether sentry connect events
+    stay (they show attempts on `--net=none`) or are folded into the host ones.
 
 ## M2 — Firecracker backend
 

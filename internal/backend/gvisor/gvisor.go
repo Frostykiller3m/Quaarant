@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,12 +35,13 @@ import (
 
 // Config configures the backend.
 type Config struct {
-	Runsc        string   // runsc binary; default "runsc" from PATH
-	StateDir     string   // runsc --root; default /run/quarantine/runsc
-	AgentPath    string   // host path of the static qt-agent binary (sandbox init)
-	CgroupParent string   // cgroup v2 parent path; default /quarantine
-	Platform     string   // runsc --platform; empty = runsc default (systrap)
-	ExtraFlags   []string // extra global runsc flags (debugging)
+	Runsc        string       // runsc binary; default "runsc" from PATH
+	StateDir     string       // runsc --root; default /run/quarantine/runsc
+	AgentPath    string       // host path of the static qt-agent binary (sandbox init)
+	CgroupParent string       // cgroup v2 parent path; default /quarantine
+	Platform     string       // runsc --platform; empty = runsc default (systrap)
+	ExtraFlags   []string     // extra global runsc flags (debugging)
+	Logger       *slog.Logger // optional
 }
 
 // Backend implements backend.Backend with runsc.
@@ -54,6 +56,7 @@ type box struct {
 	id        string
 	workspace string
 	meta      boxMeta
+	obs       *observer // runtime monitoring + upper-dir watcher; nil after a qtd restart
 }
 
 // boxMeta is saved in the bundle so a restarted qtd can keep using a running sandbox.
@@ -93,7 +96,9 @@ func (*Backend) Name() backend.Isolation { return backend.IsolationGVisor }
 
 // Capabilities implements backend.Backend. Disk snapshots, diff and syscall events arrive in
 // later tasks and are declared when they work.
-func (*Backend) Capabilities() backend.Capabilities { return backend.CapPTY }
+func (*Backend) Capabilities() backend.Capabilities {
+	return backend.CapPTY | backend.CapSyscallEvents
+}
 
 func (b *Backend) globalArgs() []string {
 	args := []string{"--root", b.cfg.StateDir, "--network=none", "--overlay2=none", "--file-access=shared", "--oci-seccomp"}
@@ -213,11 +218,20 @@ func (b *Backend) Create(ctx context.Context, s backend.Spec) (err error) {
 		return fmt.Errorf("gvisor: init log: %w", err)
 	}
 	defer func() { _ = logf.Close() }()
-	c := b.cmd("create", "--bundle", bundleDir(s.Workspace), containerID(s.ID))
+	// Observation starts before runsc create, so nothing in the sandbox runs unobserved.
+	obs, err := startObserver(s, b.cfg.Logger)
+	if err != nil {
+		return fmt.Errorf("gvisor: %w", err)
+	}
+	bx.obs = obs
+	c := b.cmd("--pod-init-config="+obs.traceConfig, "create", "--bundle", bundleDir(s.Workspace), containerID(s.ID))
 	c.Stdout, c.Stderr = logf, logf
 	if err := runWithContext(ctx, c); err != nil {
 		log, _ := os.ReadFile(filepath.Join(s.Workspace, "init.log"))
 		return fmt.Errorf("gvisor: runsc create: %w: %s", err, tail(log))
+	}
+	if err := obs.ready(); err != nil {
+		return fmt.Errorf("gvisor: runtime monitoring: %w", err)
 	}
 	return nil
 }
@@ -370,7 +384,7 @@ func (b *Backend) Exec(ctx context.Context, id string, e backend.ExecSpec) (back
 		return nil, err
 	}
 	c := b.cmd("exec", "--process", stem+".json", "--internal-pid-file", stem+".pid", containerID(id))
-	p := &process{b: b, id: id, files: []string{stem + ".json", stem + ".pid"}, pidFile: stem + ".pid", cmd: c, done: make(chan struct{})}
+	p := &process{b: b, id: id, files: []string{stem + ".json", stem + ".pid"}, pidFile: stem + ".pid", cmd: c, done: make(chan struct{}), pidReady: make(chan struct{}), exited: make(chan struct{})}
 	if e.TTY {
 		err = p.startTTY(e)
 	} else {
@@ -380,22 +394,35 @@ func (b *Backend) Exec(ctx context.Context, id string, e backend.ExecSpec) (back
 		p.cleanup()
 		return nil, fmt.Errorf("gvisor: exec: %w", err)
 	}
+	b.mu.Lock()
+	obs := bx.obs
+	b.mu.Unlock()
+	go func() {
+		p.pid = p.readPID()
+		close(p.pidReady)
+		if p.pid > 0 && obs != nil {
+			obs.launched(p.pid, proc) // runsc exec starts it directly: the sentry sees no execve
+		}
+	}()
 	go p.watch(ctx)
 	return p, nil
 }
 
 type process struct {
-	b       *Backend
-	id      string
-	cmd     *exec.Cmd
-	pidFile string
-	files   []string
-	tty     *os.File // pty master, nil without a TTY
-	ioDone  chan struct{}
-	done    chan struct{}
-	status  backend.ExitStatus
-	waitErr error
-	once    sync.Once
+	b        *Backend
+	id       string
+	cmd      *exec.Cmd
+	pidFile  string
+	pid      int           // inside the sandbox; 0 if runsc never reported it
+	pidReady chan struct{} // closed once pid is known (or given up on)
+	exited   chan struct{} // closed when runsc exec has exited
+	files    []string
+	tty      *os.File // pty master, nil without a TTY
+	ioDone   chan struct{}
+	done     chan struct{}
+	status   backend.ExitStatus
+	waitErr  error
+	once     sync.Once
 }
 
 func (p *process) startPipes(e backend.ExecSpec) error {
@@ -457,6 +484,8 @@ func orDiscard(w io.Writer) io.Writer {
 
 func (p *process) reap() {
 	err := p.cmd.Wait()
+	close(p.exited)
+	<-p.pidReady // the pid file must be read before cleanup removes it
 	if p.tty != nil {
 		select {
 		case <-p.ioDone:
@@ -530,25 +559,18 @@ func (p *process) Signal(sig int) error {
 	if sig < 1 || sig > 64 {
 		return fmt.Errorf("invalid signal %d", sig)
 	}
-	var pid []byte
-	for range 50 { // the pid file appears just after runsc exec starts the process
-		pid, _ = os.ReadFile(p.pidFile)
-		if len(bytes.TrimSpace(pid)) > 0 {
-			break
-		}
-		select {
-		case <-p.done:
-			return nil
-		case <-time.After(20 * time.Millisecond):
-		}
+	select {
+	case <-p.pidReady:
+	case <-p.done:
+		return nil
 	}
-	n, err := strconv.Atoi(string(bytes.TrimSpace(pid)))
-	if err != nil {
+	n := p.pid
+	if n <= 0 {
 		return fmt.Errorf("signal: process pid unknown")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err = p.b.run(ctx, "kill", "--pid", strconv.Itoa(n), containerID(p.id), strconv.Itoa(sig))
+	_, err := p.b.run(ctx, "kill", "--pid", strconv.Itoa(n), containerID(p.id), strconv.Itoa(sig))
 	return err
 }
 
@@ -596,6 +618,15 @@ func (b *Backend) Destroy(ctx context.Context, id string) error {
 			errs = append(errs, err)
 		}
 	}
+	var obs *observer
+	b.mu.Lock()
+	if bx, ok := b.boxes[id]; ok {
+		obs, bx.obs = bx.obs, nil
+	}
+	b.mu.Unlock()
+	if obs != nil {
+		obs.stop() // after the sentry is gone, so its last events are written
+	}
 	if ws != "" {
 		if err := unmount(rootfsDir(ws)); err != nil {
 			errs = append(errs, err)
@@ -628,4 +659,26 @@ func (b *Backend) Restore(context.Context, backend.SnapshotRef, backend.Spec) er
 // Fork implements backend.Backend.
 func (b *Backend) Fork(context.Context, string, []backend.Spec) error {
 	return backend.Require(b, backend.CapFork)
+}
+
+// readPID waits (up to 2s) for runsc exec to write the process's in-sandbox pid.
+func (p *process) readPID() int {
+	for range 200 {
+		if b, err := os.ReadFile(p.pidFile); err == nil {
+			if n, err := strconv.Atoi(string(bytes.TrimSpace(b))); err == nil && n > 0 {
+				return n
+			}
+		}
+		select {
+		case <-p.exited: // one last look: it may have written the file just before exiting
+			if b, err := os.ReadFile(p.pidFile); err == nil {
+				if n, err := strconv.Atoi(string(bytes.TrimSpace(b))); err == nil && n > 0 {
+					return n
+				}
+			}
+			return 0
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	return 0
 }

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -467,4 +469,112 @@ func TestITestCopyAndDiff(t *testing.T) {
 			t.Errorf("escaped to the host: %s", p)
 		}
 	}
+}
+
+// recorder is an EventSink that keeps schema-checked events.
+type recorder struct {
+	mu   sync.Mutex
+	evs  []events.Event
+	errs []error
+	sbID string
+}
+
+func (r *recorder) Emit(_ context.Context, src events.Source, p events.Payload) error {
+	ev, err := events.New(r.sbID, src, time.Now(), p)
+	if err == nil {
+		var raw []byte
+		raw, err = json.Marshal(ev)
+		if err == nil {
+			_, err = events.Validate(raw)
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err != nil {
+		r.errs = append(r.errs, fmt.Errorf("%T %+v: %w", p, p, err))
+		return err
+	}
+	r.evs = append(r.evs, ev)
+	return nil
+}
+
+func (r *recorder) lines() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []string
+	for _, e := range r.evs {
+		out = append(out, string(e.Kind)+" "+string(e.Data))
+	}
+	return out
+}
+
+func TestITestEvents(t *testing.T) {
+	it := setupITest(t)
+	rec := &recorder{sbID: "it4"}
+	s := backend.Spec{
+		ID: "it4", Image: it.img.Ref, RootFS: it.img.RootFS, Workspace: filepath.Join(it.data, "sandboxes", "it4"),
+		Hostname: "qt-it4", User: "65534:65534", Env: []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/tmp"},
+		Limits: backend.DefaultLimits, Network: backend.Network{None: true}, Events: rec,
+	}
+	ctx := context.Background()
+	if err := it.b.Create(ctx, s); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	t.Cleanup(func() { _ = it.b.Destroy(context.Background(), s.ID) })
+	if err := it.b.Start(ctx, s.ID); err != nil {
+		t.Fatal(err)
+	}
+	r := it.exec(t, s.ID, sh(`cat /etc/os-release >/dev/null; echo data > /tmp/f; mkdir /tmp/d; ln -s /etc/passwd /tmp/l
+		mv /tmp/f /tmp/g; rm /tmp/g; cat /etc/shadow 2>/dev/null; nc -w 1 192.0.2.7 80 </dev/null 2>/dev/null; true`))
+	if r.status.Code != 0 {
+		t.Fatalf("exec: %+v", r)
+	}
+	time.Sleep(3 * time.Second) // writes are flushed after 2s at the latest
+	lines := rec.lines()
+	for _, l := range lines {
+		t.Log(l)
+	}
+	for _, e := range rec.errs {
+		t.Errorf("invalid event: %v", e)
+	}
+	// Each expectation is a set of substrings that must all appear in one event line.
+	want := [][]string{
+		{`exec `, `"ppid":0`, `"path":"/bin/sh"`, `"argv":["/bin/sh","-c",`}, // started by qt (host)
+		{`exec `, `"argv":["cat","/etc/os-release"]`, `"sha256":"`},          // from the sentry
+		{`file `, `"op":"open"`, `"path":"/etc/os-release"`, `"flags":["O_RDONLY"]`},
+		{`file `, `"op":"create"`, `"path":"/tmp/f"`},
+		{`file `, `"op":"write"`, `"path":"/tmp/f"`, `"bytes":5`},
+		{`file `, `"op":"mkdir"`, `"path":"/tmp/d"`},
+		{`file `, `"op":"symlink"`, `"path":"/tmp/l"`, `"new_path":"/etc/passwd"`},
+		{`file `, `"op":"rename"`, `"path":"/tmp/f"`, `"new_path":"/tmp/g"`},
+		{`file `, `"op":"unlink"`, `"path":"/tmp/g"`},
+		{`file `, `"op":"open"`, `"path":"/etc/shadow"`, `"errno":"EACCES"`},
+		{`net `, `"op":"connect"`, `"proto":"tcp"`, `"dst_ip":"192.0.2.7"`, `"dst_port":80`, `"allowed":false`, `"errno":"ENETUNREACH"`},
+	}
+	for _, w := range want {
+		if !anyLine(lines, w) {
+			t.Errorf("no event with %q", w)
+		}
+	}
+	for _, l := range lines {
+		if strings.Contains(l, `"pid":1,`) || strings.Contains(l, `"path":"/dev/null"`) || strings.Contains(l, `/.qt/`) {
+			t.Errorf("noise from qt itself or /dev/null: %s", l)
+		}
+	}
+}
+
+func anyLine(lines, subs []string) bool {
+	for _, l := range lines {
+		ok := true
+		for _, s := range subs {
+			if !strings.Contains(l, s) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
 }

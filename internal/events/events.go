@@ -70,6 +70,7 @@ type Exec struct {
 	ArgvTruncated bool     `json:"argv_truncated,omitempty"`
 	Cwd           string   `json:"cwd,omitempty"`
 	ExitCode      *int     `json:"exit_code,omitempty"`
+	SHA256        string   `json:"sha256,omitempty"` // of the executed binary
 }
 
 // File is a filesystem operation.
@@ -81,6 +82,7 @@ type File struct {
 	Flags   []string `json:"flags,omitempty"`
 	Mode    string   `json:"mode,omitempty"`
 	Bytes   *int64   `json:"bytes,omitempty"`
+	Errno   string   `json:"errno,omitempty"` // set when the operation failed, e.g. EACCES
 }
 
 // Net is a network connection, always observed on the host.
@@ -97,6 +99,7 @@ type Net struct {
 	BytesOut   *int64 `json:"bytes_out,omitempty"`
 	BytesIn    *int64 `json:"bytes_in,omitempty"`
 	DurationMS *int64 `json:"duration_ms,omitempty"`
+	Errno      string `json:"errno,omitempty"` // set when the connection failed
 }
 
 // DNS is a query answered (or refused) by the per-sandbox resolver.

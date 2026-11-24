@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "id": "ev_08c1e5a7b9d2403f8e6a7b8c9d0e1f2a",
+  "ts": "2026-11-23T07:00:03.902114Z",
+  "sandbox": "sb-7f3k2q",
+  "kind": "file",
+  "source": "host",
+  "data": {
+    "op": "open",
+    "path": "/etc/shadow",
+    "pid": 431,
+    "flags": ["O_RDONLY"],
+    "errno": "EACCES"
+  }
+}

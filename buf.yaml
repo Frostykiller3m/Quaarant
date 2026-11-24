@@ -1,6 +1,17 @@
 version: v2
 modules:
   - path: proto
+  # gVisor's runtime-monitoring protos, vendored unmodified (third_party/gvisor/README.md):
+  # not ours to restyle, so only the checks they pass are on, and no breaking checks.
+  - path: third_party/gvisor
+    lint:
+      use:
+        - MINIMAL
+      except:
+        - PACKAGE_DIRECTORY_MATCH
+        - DIRECTORY_SAME_PACKAGE
+    breaking:
+      use: []
 lint:
   use:
     - STANDARD

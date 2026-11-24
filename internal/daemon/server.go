@@ -53,6 +53,7 @@ type Service struct {
 	backends map[backend.Isolation]backend.Backend
 	log      *slog.Logger
 	locks    sync.Map // sandbox id -> *sync.Mutex (create/destroy are serialized per id)
+	logs     sync.Map // sandbox id -> *eventLog
 }
 
 // New loads the registry from the data dir and returns the service.
@@ -208,7 +209,7 @@ func (s *Service) Create(ctx context.Context, req *qtdv1.CreateRequest) (*qtdv1.
 		ID: id, Image: img.Ref, RootFS: img.RootFS, Workspace: ws, Hostname: hostname,
 		User: user, Env: env, Workdir: workdir, Limits: limits,
 		Network: backend.Network{None: true},
-		Events:  &eventLog{path: filepath.Join(ws, "events.jsonl"), sandbox: id},
+		Events:  s.eventLogFor(id),
 		Labels:  req.GetLabels(),
 	}
 	if err := be.Create(ctx, spec); err != nil {
@@ -241,6 +242,9 @@ func (s *Service) cleanup(id string, be backend.Backend) {
 	if err := be.Destroy(ctx, id); err != nil {
 		s.log.Error("cleanup after failed create", "id", id, "err", err)
 		return // keep the workspace so `qt rm` can retry
+	}
+	if l, ok := s.logs.LoadAndDelete(id); ok {
+		l.(*eventLog).close()
 	}
 	_ = os.RemoveAll(s.reg.workspace(id))
 	s.reg.remove(id)
@@ -351,6 +355,9 @@ func (s *Service) Destroy(ctx context.Context, req *qtdv1.DestroyRequest) (*qtdv
 	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, status.Errorf(codes.Internal, "destroy %s: %v", id, err)
+	}
+	if l, ok := s.logs.LoadAndDelete(id); ok {
+		l.(*eventLog).close() // ends followers after they read the last events
 	}
 	if err := os.RemoveAll(s.reg.workspace(id)); err != nil {
 		return nil, status.Errorf(codes.Internal, "remove workspace: %v", err)

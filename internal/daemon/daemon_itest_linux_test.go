@@ -23,6 +23,7 @@ import (
 	qtdv1 "github.com/Frostykiller3m/Quaarant/internal/api/qtd/v1"
 	"github.com/Frostykiller3m/Quaarant/internal/backend"
 	"github.com/Frostykiller3m/Quaarant/internal/backend/gvisor"
+	"github.com/Frostykiller3m/Quaarant/internal/events"
 	"github.com/Frostykiller3m/Quaarant/internal/image"
 )
 
@@ -98,6 +99,37 @@ func TestITestDaemonGVisor(t *testing.T) {
 	if err != nil || len(list.GetSandboxes()) != 1 || list.GetSandboxes()[0].GetState() != qtdv1.SandboxState_SANDBOX_STATE_RUNNING {
 		t.Errorf("list = %v %v", list, err)
 	}
+
+	// Runtime monitoring reached events.jsonl, through the Events RPC.
+	time.Sleep(2500 * time.Millisecond) // pending writes flush after 2s
+	evs, err := readEvents(t, h, &qtdv1.EventsRequest{SandboxId: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var joined []string
+	for _, e := range evs {
+		joined = append(joined, string(e.GetEventJson()))
+	}
+	all := strings.Join(joined, "\n")
+	for _, want := range []string{
+		`"kind":"exec","source":"host","data":{"pid":`,             // the exec'd sh, recorded by qtd
+		`"argv":["id","-u"]`, `"argv":["cat","/proc/self/status"]`, // children, from the sentry
+		`"op":"write","path":"/tmp/f"`,
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("no event with %s in:\n%s", want, all)
+		}
+	}
+	f, err := os.Open(filepath.Join(data, "sandboxes", id, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	if err := events.ValidateStream(f, func(events.Event) error { n++; return nil }); err != nil || n != len(evs) {
+		t.Errorf("events.jsonl: %d valid events (err %v), RPC returned %d", n, err, len(evs))
+	}
+	_ = f.Close()
+	t.Logf("%d events, all schema-valid", n)
 
 	// Copy files in over the real RPC, let the sandbox change them, and diff.
 	var tarBuf bytes.Buffer

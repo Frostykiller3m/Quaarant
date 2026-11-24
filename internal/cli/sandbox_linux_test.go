@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 
@@ -193,5 +194,45 @@ func TestCLICopyAndDiff(t *testing.T) {
 		if r := runQt(t, socket, "", args...); r.code != 1 {
 			t.Errorf("%v = %+v, want an error", args, r)
 		}
+	}
+}
+
+func TestCLIEvents(t *testing.T) {
+	socket, _, _ := qtd(t)
+	if r := runQt(t, socket, "", "run", "-q", "alpine", "--", "cat", "/etc/passwd"); r.code != 0 {
+		t.Fatal(r)
+	}
+	id := strings.TrimSpace(runQt(t, socket, "", "ls", "-q").stdout)
+	r := runQt(t, socket, "", "events", id)
+	if r.code != 0 || !regexp.MustCompile(`(?m)^\d\d:\d\d:\d\d\.\d{3}  exec  pid=2 ppid=1  cat cat /etc/passwd$`).MatchString(r.stdout) {
+		t.Errorf("events = %+v", r)
+	}
+	if r := runQt(t, socket, "", "events", "--json", id); r.code != 0 || !strings.Contains(r.stdout, `"kind":"exec"`) {
+		t.Errorf("events --json = %+v", r)
+	}
+	if r := runQt(t, socket, "", "events", "--kind", "file,net", id); r.code != 0 || r.stdout != "" {
+		t.Errorf("events --kind = %+v", r)
+	}
+	if r := runQt(t, socket, "", "events", "--kind", "bogus", id); r.code != 1 || !strings.Contains(r.stderr, "unknown event kind") {
+		t.Errorf("events --kind bogus = %+v", r)
+	}
+	// --follow prints new events and returns when the sandbox is removed.
+	done := make(chan cliResult, 1)
+	go func() { done <- runQt(t, socket, "", "events", "-f", id) }()
+	time.Sleep(300 * time.Millisecond)
+	if r := runQt(t, socket, "", "exec", id, "--", "id", "-u"); r.code != 0 {
+		t.Fatal(r)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if r := runQt(t, socket, "", "rm", id); r.code != 0 {
+		t.Fatal(r)
+	}
+	select {
+	case r := <-done:
+		if r.code != 0 || !strings.Contains(r.stdout, "id id -u") || !strings.Contains(r.stdout, "cat cat /etc/passwd") {
+			t.Errorf("events -f = %+v", r)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("events -f did not end after rm")
 	}
 }
