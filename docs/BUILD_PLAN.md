@@ -144,10 +144,25 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
   - `qt diff` for vm (mount a read-only thin snapshot of a stopped/paused disk) — M6.
   - Snapshots are tied to this host's CPU and kernel; restoring elsewhere is unsupported.
 
-- [ ] **M2-T3 · vm events**
+- [x] **M2-T3 · vm events**
       Done when: qt-agent emits the same event schema (fanotify for files, proc connector or
       polling for exec); the guest can't lie about network activity (network events come from
       the host side).
+
+  Done: proc connector (exec) and fanotify (files) in qt-agent, streamed over vsock and
+  written as `source: guest`; qtd accepts only exec/file kinds from a guest (unit-tested with
+  forged net/dns/honeytoken events); a VM has no network device with `--net=none`.
+
+  Follow-ups noted during M2-T3 (not done there):
+  - Exec argv is lost for processes that exit within ~1 ms (busybox applets), failed opens
+    (e.g. a denied /etc/shadow read) are invisible, and attribute changes to files deleted
+    right after are missed. The guest kernel's audit subsystem (CONFIG_AUDIT, execve and
+    failing-open rules over NETLINK_AUDIT) records all of these in-kernel; use it.
+  - The event stream does not survive a qtd restart (the backend no longer has the sandbox's
+    event log); the agent's ring buffers 8192 events meanwhile.
+  - `exec.exit_code` is not filled in for vm either (the proc connector's exit events carry it).
+  - Every itest pulls `alpine:3.22` into a fresh store (~13 Docker Hub pulls per `make itest`);
+    repeated runs hit the anonymous limit (100/h). Share one image cache across itests.
 
 ## M3 — Network policy
 

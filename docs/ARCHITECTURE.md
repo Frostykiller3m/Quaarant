@@ -155,6 +155,26 @@ The two backends share integration tests, so the same command behaves the same o
   per image. The image store remembers tag resolutions for 10 minutes and serves cached
   digests without asking the registry, which saved 0.5–1 s per `qt run`.
 
+### vm events (M2-T3)
+
+- **In the guest**, qt-agent watches exec with the kernel's proc connector (netlink; argv,
+  path, cwd and uid read from `/proc`, parent pid tracked from fork events, the binary from
+  fanotify's `FAN_OPEN_EXEC` if the process is already gone). It watches files with one
+  fanotify group on the root filesystem (`FAN_REPORT_DFID_NAME`, paths resolved with
+  `open_by_handle_at`): open, write (close after writing, size at processing time), create,
+  mkdir, symlink, unlink, rename (`FAN_RENAME`) and chmod. The agent's own pids are never
+  reported, so `qt cp` is not sandbox activity. Events queue in a bounded ring (8192) until
+  qtd subscribes over vsock (`events`), and the ring is cleared when a snapshot is restored,
+  so the golden VM's boot never shows up.
+- **On the host**, qtd decodes them strictly and accepts only `exec` and `file`, written
+  as `source: guest` (claims made inside the VM). Network, DNS, policy and honeytoken
+  events from a guest are dropped and counted. With `--net=none` the VM has no network device,
+  so there is no traffic to see; M3's tap devices are observed on the host.
+- **Differences from gvisor** (whose events come from the runtime, `source: host`): a path
+  is the file actually opened (symlinks resolved); failed opens are invisible to fanotify; a
+  process that exits within a fraction of a millisecond has its exec reported without argv
+  (`argv_truncated`); `write` carries the file's size, not the bytes written.
+
 ## qtd and its socket
 
 qtd runs as root under systemd (`contrib/systemd/qtd.service`, `make install`). It listens on
