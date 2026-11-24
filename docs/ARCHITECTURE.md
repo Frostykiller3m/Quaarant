@@ -173,7 +173,9 @@ The two backends share integration tests, so the same command behaves the same o
 - **Differences from gvisor** (whose events come from the runtime, `source: host`): a path
   is the file actually opened (symlinks resolved); failed opens are invisible to fanotify; a
   process that exits within a fraction of a millisecond has its exec reported without argv
-  (`argv_truncated`); `write` carries the file's size, not the bytes written.
+  (`argv_truncated`), and argv is read from the live process, which can rewrite it (busybox
+  `sleep 0.3` briefly does; `setproctitle` does on purpose); `write` carries the file's size,
+  not the bytes written.
 
 ## qtd and its socket
 

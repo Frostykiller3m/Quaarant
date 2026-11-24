@@ -396,7 +396,7 @@ func TestITestVMEvents(t *testing.T) {
 	if err := v.B.CopyIn(ctx, s.ID, "/work", &tb); err != nil {
 		t.Fatal(err)
 	}
-	out, errs, st := v.exec(t, s.ID, backend.ExecSpec{Argv: []string{"/bin/sh", "-c", `cat /etc/os-release >/dev/null; sleep 0.3; echo data > /tmp/f; mkdir /tmp/d; ln -s /etc/passwd /tmp/l
+	out, errs, st := v.exec(t, s.ID, backend.ExecSpec{Argv: []string{"/bin/sh", "-c", `cat /etc/os-release >/dev/null; sleep 1; echo data > /tmp/f; mkdir /tmp/d; ln -s /etc/passwd /tmp/l
 		mv /tmp/f /tmp/g; rm /tmp/g; chmod 700 /tmp/d; nc -w 1 192.0.2.7 80 </dev/null 2>/dev/null; true`}})
 	if st.Code != 0 {
 		t.Fatalf("exec: %q %q %+v", out, errs, st)
@@ -412,8 +412,9 @@ func TestITestVMEvents(t *testing.T) {
 	want := [][]string{
 		{`exec guest`, `"argv":["/bin/sh","-c",`},
 		// argv and uid are read from /proc: assert them on a process that lives long enough
-		// (one that exits within ~1 ms is reported with argv_truncated; see BUILD_PLAN M2-T3).
-		{`exec guest`, `"path":"/bin/busybox"`, `"argv":["sleep","0.3"]`, `"uid":65534`},
+		// (one that exits within ~1 ms is reported with argv_truncated; see BUILD_PLAN M2-T3), and
+		// one that does not rewrite its own argv (busybox sleep does, briefly, for "0.3").
+		{`exec guest`, `"path":"/bin/busybox"`, `"argv":["sleep","1"]`, `"uid":65534`},
 		{`file guest`, `"op":"open"`, `os-release"`}, // fanotify reports the file opened: /usr/lib/os-release (alpine's /etc/os-release is a symlink)
 		{`file guest`, `"op":"create"`, `"path":"/tmp/f"`},
 		{`file guest`, `"op":"write"`, `"path":"/tmp/f"`, `"bytes":5`},

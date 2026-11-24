@@ -155,7 +155,8 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
 
   Follow-ups noted during M2-T3 (not done there):
   - Exec argv is lost for processes that exit within ~1 ms (busybox applets), failed opens
-    (e.g. a denied /etc/shadow read) are invisible, and attribute changes to files deleted
+    (e.g. a denied /etc/shadow read) are invisible, argv is read from the live process (which
+    can rewrite it, e.g. setproctitle), and attribute changes to files deleted
     right after are missed. The guest kernel's audit subsystem (CONFIG_AUDIT, execve and
     failing-open rules over NETLINK_AUDIT) records all of these in-kernel; use it.
   - The event stream does not survive a qtd restart (the backend no longer has the sandbox's
@@ -163,6 +164,10 @@ needs nested virtualization (`nestedVirtualization=true` in `.wslconfig`) and `/
   - `exec.exit_code` is not filled in for vm either (the proc connector's exit events carry it).
   - Every itest pulls `alpine:3.22` into a fresh store (~13 Docker Hub pulls per `make itest`);
     repeated runs hit the anonymous limit (100/h). Share one image cache across itests.
+  - Pre-existing (M1-T3) flake seen once in 3 full `make itest` runs (0/40 alone):
+    TestITestWatchOverlay timed out on a missing event, most likely `chmod` then an immediate
+    `mv`: the watcher drops IN_ATTRIB when the path is already gone. Same race in the vm agent.
+    Report the chmod with the inode's mode (fstat by handle) or keep the path rename-aware.
 
 ## M3 — Network policy
 
